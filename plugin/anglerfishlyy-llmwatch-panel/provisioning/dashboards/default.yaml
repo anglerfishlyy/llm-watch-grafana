@@ -1,0 +1,7 @@
+apiVersion: 1
+
+providers:
+  - name: 'llm-watch-panel'
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards
