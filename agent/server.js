@@ -1,8 +1,8 @@
 require('dotenv').config();
-const express = require('express');
-const { parseUsage, estimateTokensFromText } = require('./tokenUtils');
+import express, { json } from 'express';
+import { parseUsage, estimateTokensFromText } from './tokenUtils';
 const app = express();
-app.use(express.json());
+app.use(json());
 
 // Allow Grafana dev server in the browser to fetch
 app.use((req, res, next) => {
