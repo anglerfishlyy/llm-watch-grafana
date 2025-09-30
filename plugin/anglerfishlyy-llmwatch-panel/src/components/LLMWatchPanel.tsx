@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { PanelProps } from "@grafana/data";
+import { PanelProps, PanelPlugin } from "@grafana/data";
 import {
   LineChart,
   Line,
@@ -23,17 +23,29 @@ interface Metrics {
   error: string | null;
 }
 
-interface Props extends PanelProps {}
+interface Aggregates {
+  avgLatency: number;
+  avgCost: number;
+  errorRate: number;
+}
 
-export const LLMWatchPanel: React.FC<Props> = ({ width, height }) => {
+const LLMWatchPanel: React.FC<PanelProps> = () => {
   const [metrics, setMetrics] = useState<Metrics[]>([]);
+  const [aggregates, setAggregates] = useState<Aggregates | null>(null);
 
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch("http://localhost:8080/metrics/all");
-        const data = await res.json();
-        setMetrics(data);
+        const [metricsRes, aggRes] = await Promise.all([
+          fetch("http://localhost:8080/metrics/all"),
+          fetch("http://localhost:8080/metrics/aggregates"),
+        ]);
+
+        const metricsData = await metricsRes.json();
+        const aggregatesData = await aggRes.json();
+
+        setMetrics(metricsData);
+        setAggregates(aggregatesData);
       } catch (err) {
         console.error("Error fetching metrics:", err);
       }
@@ -53,36 +65,57 @@ export const LLMWatchPanel: React.FC<Props> = ({ width, height }) => {
   }));
 
   return (
-    <div style={{ padding: 16, width, height, overflow: "auto" }}>
-      <h2 style={{ fontWeight: "bold", marginBottom: 16 }}>LLM Metrics Dashboard</h2>
+    <div className="p-4">
+      <h2 className="text-lg font-bold mb-2">LLM Metrics Dashboard</h2>
 
       {/* Latest snapshot */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
-        <div style={{ padding: 12, background: "#f0f0f0", borderRadius: 8 }}>
-          <p style={{ fontWeight: 600 }}>Latency</p>
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="bg-gray-100 rounded-xl p-3 shadow">
+          <p className="font-semibold">Latency</p>
           <p>{latest.latency.toFixed(2)} ms</p>
         </div>
-        <div style={{ padding: 12, background: "#f0f0f0", borderRadius: 8 }}>
-          <p style={{ fontWeight: 600 }}>Cost</p>
+        <div className="bg-gray-100 rounded-xl p-3 shadow">
+          <p className="font-semibold">Cost</p>
           <p>${latest.cost.toFixed(6)}</p>
         </div>
-        <div style={{ padding: 12, background: "#f0f0f0", borderRadius: 8 }}>
-          <p style={{ fontWeight: 600 }}>Tokens</p>
-          <p>{latest.promptTokens} + {latest.completionTokens} = {latest.totalTokens}</p>
+        <div className="bg-gray-100 rounded-xl p-3 shadow">
+          <p className="font-semibold">Tokens</p>
+          <p>
+            {latest.promptTokens} + {latest.completionTokens} ={" "}
+            {latest.totalTokens}
+          </p>
         </div>
         {latest.error && (
-          <div style={{ padding: 12, background: "#ffe5e5", borderRadius: 8, color: "#a00" }}>
-            <p style={{ fontWeight: 600 }}>Error</p>
+          <div className="bg-red-100 rounded-xl p-3 shadow text-red-600">
+            <p className="font-semibold">Error</p>
             <p>{latest.error}</p>
           </div>
         )}
       </div>
 
+      {/* Aggregates */}
+      {aggregates && (
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="bg-yellow-100 rounded-xl p-3 shadow">
+            <p className="font-semibold">Avg Latency (last 10)</p>
+            <p>{aggregates.avgLatency.toFixed(2)} ms</p>
+          </div>
+          <div className="bg-yellow-100 rounded-xl p-3 shadow">
+            <p className="font-semibold">Avg Cost (last 10)</p>
+            <p>${aggregates.avgCost.toFixed(6)}</p>
+          </div>
+          <div className="bg-yellow-100 rounded-xl p-3 shadow">
+            <p className="font-semibold">Error Rate</p>
+            <p>{(aggregates.errorRate * 100).toFixed(2)}%</p>
+          </div>
+        </div>
+      )}
+
       {/* Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 24 }}>
-        {/* Latency */}
-        <div style={{ background: "#fff", borderRadius: 8, padding: 12 }}>
-          <h3 style={{ fontWeight: 600, marginBottom: 8 }}>Latency Trend</h3>
+      <div className="grid grid-cols-2 gap-6">
+        {/* Latency trend */}
+        <div className="bg-white rounded-xl shadow p-2">
+          <h3 className="text-md font-bold mb-2">Latency Trend</h3>
           <ResponsiveContainer width="100%" height={250}>
             <LineChart data={formatted}>
               <CartesianGrid stroke="#ccc" />
@@ -94,9 +127,9 @@ export const LLMWatchPanel: React.FC<Props> = ({ width, height }) => {
           </ResponsiveContainer>
         </div>
 
-        {/* Cost */}
-        <div style={{ background: "#fff", borderRadius: 8, padding: 12 }}>
-          <h3 style={{ fontWeight: 600, marginBottom: 8 }}>Cost Trend</h3>
+        {/* Cost trend */}
+        <div className="bg-white rounded-xl shadow p-2">
+          <h3 className="text-md font-bold mb-2">Cost Trend</h3>
           <ResponsiveContainer width="100%" height={250}>
             <LineChart data={formatted}>
               <CartesianGrid stroke="#ccc" />
@@ -108,9 +141,9 @@ export const LLMWatchPanel: React.FC<Props> = ({ width, height }) => {
           </ResponsiveContainer>
         </div>
 
-        {/* Tokens */}
-        <div style={{ background: "#fff", borderRadius: 8, padding: 12, gridColumn: "span 2" }}>
-          <h3 style={{ fontWeight: 600, marginBottom: 8 }}>Token Usage</h3>
+        {/* Tokens breakdown */}
+        <div className="bg-white rounded-xl shadow p-2 col-span-2">
+          <h3 className="text-md font-bold mb-2">Token Usage</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={formatted}>
               <CartesianGrid stroke="#ccc" />
@@ -127,3 +160,6 @@ export const LLMWatchPanel: React.FC<Props> = ({ width, height }) => {
     </div>
   );
 };
+
+// Export plugin
+export const plugin = new PanelPlugin(LLMWatchPanel);
