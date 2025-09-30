@@ -1,7 +1,7 @@
 {
   "name": "agent",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "server.js",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -14,7 +14,9 @@
   "description": "",
   "dependencies": {
     "dotenv": "^17.2.2",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "axios": "^1.7.0",
+    "cors": "^2.8.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
