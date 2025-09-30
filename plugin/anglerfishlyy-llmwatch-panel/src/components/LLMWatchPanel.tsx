@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { PanelProps, PanelPlugin } from "@grafana/data";
 import { useTheme2, Badge } from "@grafana/ui";
 import {
@@ -16,46 +16,34 @@ import {
 } from "recharts";
 import { TrendingUp, TrendingDown, AlertCircle, Activity, DollarSign, Layers } from "lucide-react";
 
-interface Metrics {
-  timestamp: number;
-  latency: number;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  cost: number;
-  error: string | null;
+interface LLMWatchOptions {
+  showSparklines: boolean;
+  latencyThresholdWarning: number;
+  latencyThresholdCritical: number;
+  costThresholdWarning: number;
+  costThresholdCritical: number;
 }
 
-interface Aggregates {
-  avgLatency: number;
-  avgCost: number;
-  errorRate: number;
-}
+const defaultOptions: LLMWatchOptions = {
+  showSparklines: true,
+  latencyThresholdWarning: 100,
+  latencyThresholdCritical: 200,
+  costThresholdWarning: 0.0001,
+  costThresholdCritical: 0.0002,
+};
 
-export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
+export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({ 
+  options, 
+  data, 
+  width, 
+  height 
+}) => {
   const theme = useTheme2();
-  const [metrics, setMetrics] = useState<Metrics[]>([]);
-  const [aggregates, setAggregates] = useState<Aggregates | null>(null);
 
-  useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const [metricsRes, aggRes] = await Promise.all([
-          fetch("http://localhost:8080/metrics/all"),
-          fetch("http://localhost:8080/metrics/aggregates"),
-        ]);
-        setMetrics(await metricsRes.json());
-        setAggregates(await aggRes.json());
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  if (!metrics.length) {
+  // Extract data from Grafana data frames
+  const series = data.series;
+  
+  if (!series || series.length === 0) {
     return (
       <div 
         style={{ 
@@ -79,10 +67,65 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
           <div style={{ 
             color: theme.colors.text.secondary, 
             fontSize: theme.typography.h5.fontSize,
-            fontFamily: theme.typography.fontFamily 
+            fontFamily: theme.typography.fontFamily,
+            marginBottom: theme.spacing(1)
           }}>
-            Loading metrics...
+            No data
           </div>
+          <div style={{ 
+            color: theme.colors.text.disabled, 
+            fontSize: theme.typography.bodySmall.fontSize,
+            fontFamily: theme.typography.fontFamily
+          }}>
+            Configure a data source in the Query tab
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Parse metrics from data frames
+  // Expected fields: timestamp, latency, promptTokens, completionTokens, totalTokens, cost, error
+  const metrics: any[] = [];
+  const frame = series[0];
+  const length = frame.length;
+
+  // Find field indices
+  const timestampField = frame.fields.find(f => f.name === 'timestamp' || f.name === 'time' || f.name === 'Time');
+  const latencyField = frame.fields.find(f => f.name === 'latency');
+  const promptTokensField = frame.fields.find(f => f.name === 'promptTokens' || f.name === 'prompt_tokens');
+  const completionTokensField = frame.fields.find(f => f.name === 'completionTokens' || f.name === 'completion_tokens');
+  const totalTokensField = frame.fields.find(f => f.name === 'totalTokens' || f.name === 'total_tokens');
+  const costField = frame.fields.find(f => f.name === 'cost');
+  const errorField = frame.fields.find(f => f.name === 'error');
+
+  // Build metrics array
+  for (let i = 0; i < length; i++) {
+    metrics.push({
+      timestamp: timestampField?.values[i] || Date.now(),
+      latency: latencyField?.values[i] || 0,
+      promptTokens: promptTokensField?.values[i] || 0,
+      completionTokens: completionTokensField?.values[i] || 0,
+      totalTokens: totalTokensField?.values[i] || 0,
+      cost: costField?.values[i] || 0,
+      error: errorField?.values[i] || null,
+    });
+  }
+
+  if (metrics.length === 0) {
+    return (
+      <div 
+        style={{ 
+          width,
+          height,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'transparent',
+        }}
+      >
+        <div style={{ textAlign: 'center', color: theme.colors.text.secondary }}>
+          No metric data available
         </div>
       </div>
     );
@@ -93,6 +136,14 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
     ...m,
     time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
   }));
+
+  // Calculate aggregates from last 10 records
+  const last10 = metrics.slice(-10);
+  const aggregates = {
+    avgLatency: last10.reduce((sum, m) => sum + m.latency, 0) / last10.length,
+    avgCost: last10.reduce((sum, m) => sum + m.cost, 0) / last10.length,
+    errorRate: last10.filter(m => m.error).length / last10.length,
+  };
 
   const getColor = (val: number, thresholds: [number, number]) => {
     if (val > thresholds[1]) return theme.visualization.getColorByName('red');
@@ -117,7 +168,7 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
   const costTrend = getTrend(latest.cost, prevCost);
 
   // Responsive sizing based on Grafana standards
-  const showSparklines = height >= 200;
+  const showSparklines = options.showSparklines && height >= 200;
   const showCharts = height > 350;
   const showAggregates = height > 250;
 
@@ -125,7 +176,7 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
     title: string;
     value: string | number;
     icon: React.ReactNode;
-    sparkKey?: keyof Metrics;
+    sparkKey?: string;
     color: string;
     trend?: { value: string; isUp: boolean; color: string } | null;
     subtitle?: string;
@@ -264,8 +315,8 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
     </div>
   );
 
-  const latencyColor = getColor(latest.latency, [100, 200]);
-  const costColor = getColor(latest.cost, [0.0001, 0.0002]);
+  const latencyColor = getColor(latest.latency, [options.latencyThresholdWarning, options.latencyThresholdCritical]);
+  const costColor = getColor(latest.cost, [options.costThresholdWarning, options.costThresholdCritical]);
 
   return (
     <div style={{ 
@@ -292,7 +343,7 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
           icon={<Activity />}
           sparkKey="latency"
           color={latencyColor}
-          warning={latest.latency > 200}
+          warning={latest.latency > options.latencyThresholdCritical}
           trend={latencyTrend}
         />
         <MetricCard
@@ -301,7 +352,7 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
           icon={<DollarSign />}
           sparkKey="cost"
           color={costColor}
-          warning={latest.cost > 0.0002}
+          warning={latest.cost > options.costThresholdCritical}
           trend={costTrend}
         />
         <MetricCard 
@@ -323,7 +374,7 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
       </div>
 
       {/* Aggregate Stats */}
-      {aggregates && showAggregates && (
+      {showAggregates && (
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, minmax(200px, 1fr))',
@@ -615,4 +666,42 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
   );
 };
 
-export const plugin = new PanelPlugin(LLMWatchPanel);
+export const plugin = new PanelPlugin<LLMWatchOptions>(LLMWatchPanel).setPanelOptions((builder) => {
+  return builder
+    .addBooleanSwitch({
+      path: 'showSparklines',
+      name: 'Show sparklines',
+      description: 'Display mini trend charts in metric cards',
+      defaultValue: defaultOptions.showSparklines,
+    })
+    .addNumberInput({
+      path: 'latencyThresholdWarning',
+      name: 'Latency warning threshold (ms)',
+      description: 'Show warning color when latency exceeds this value',
+      defaultValue: defaultOptions.latencyThresholdWarning,
+    })
+    .addNumberInput({
+      path: 'latencyThresholdCritical',
+      name: 'Latency critical threshold (ms)',
+      description: 'Show critical color and alert when latency exceeds this value',
+      defaultValue: defaultOptions.latencyThresholdCritical,
+    })
+    .addNumberInput({
+      path: 'costThresholdWarning',
+      name: 'Cost warning threshold ($)',
+      description: 'Show warning color when cost exceeds this value',
+      defaultValue: defaultOptions.costThresholdWarning,
+      settings: {
+        step: 0.00001,
+      },
+    })
+    .addNumberInput({
+      path: 'costThresholdCritical',
+      name: 'Cost critical threshold ($)',
+      description: 'Show critical color and alert when cost exceeds this value',
+      defaultValue: defaultOptions.costThresholdCritical,
+      settings: {
+        step: 0.00001,
+      },
+    });
+});
