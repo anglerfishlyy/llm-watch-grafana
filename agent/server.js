@@ -11,39 +11,76 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
+const LLAMA_API_KEY = process.env.LLAMA_API_KEY; // placeholder for Meta
 const CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions";
+// If Meta Llama API is approved, update this:
+const LLAMA_API_URL = "https://api.llama.meta/v1/chat/completions";
 
 // in-memory store
 let metrics = [];
 
+// Utility to call Cerebras
+async function callCerebras(prompt) {
+  const response = await fetch(CEREBRAS_API_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${CEREBRAS_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama3.1-8b",
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  return response.json();
+}
+
+// Utility to call Llama (placeholder if access not granted)
+async function callLlama(prompt) {
+  if (!LLAMA_API_KEY) {
+    return {
+      choices: [{ message: { content: "[LLAMA unavailable: no API key]" } }],
+      usage: null,
+    };
+  }
+  const response = await fetch(LLAMA_API_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${LLAMA_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3-8b-chat",
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  return response.json();
+}
+
 app.post("/call", async (req, res) => {
-  const { prompt } = req.body;
+  const { provider = "cerebras", prompt } = req.body;
   const start = performance.now();
 
   try {
-    const response = await fetch(CEREBRAS_API_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${CEREBRAS_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "llama3.1-8b", // change to the model you want
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    let json;
+    if (provider === "llama") {
+      json = await callLlama(prompt);
+    } else {
+      json = await callCerebras(prompt);
+    }
 
-    const json = await response.json();
     const latency = performance.now() - start;
 
     const usage = json.usage || {};
     const promptTokens = usage.prompt_tokens ?? calculateTokens(prompt);
     const completionTokens =
-      usage.completion_tokens ?? calculateTokens(json.choices?.[0]?.message?.content || "");
+      usage.completion_tokens ??
+      calculateTokens(json.choices?.[0]?.message?.content || "");
     const totalTokens = promptTokens + completionTokens;
 
     const entry = {
       timestamp: Date.now(),
+      provider,
       latency,
       promptTokens,
       completionTokens,
@@ -60,6 +97,7 @@ app.post("/call", async (req, res) => {
     const latency = performance.now() - start;
     const entry = {
       timestamp: Date.now(),
+      provider,
       latency,
       promptTokens: 0,
       completionTokens: 0,
@@ -83,8 +121,8 @@ app.get("/metrics/all", (req, res) => {
 
 app.get("/metrics/aggregates", (req, res) => {
   const last10 = metrics.slice(-10);
-  const avgLatency = last10.reduce((a, m) => a + m.latency, 0) / last10.length;
-  const avgCost = last10.reduce((a, m) => a + m.cost, 0) / last10.length;
+  const avgLatency = last10.reduce((a, m) => a + m.latency, 0) / (last10.length || 1);
+  const avgCost = last10.reduce((a, m) => a + m.cost, 0) / (last10.length || 1);
   const errorRate =
     last10.filter((m) => m.error !== null).length / (last10.length || 1);
 
@@ -94,7 +132,6 @@ app.get("/metrics/aggregates", (req, res) => {
     errorRate,
   });
 });
-
 
 app.listen(PORT, () => {
   console.log(`Agent running on http://localhost:${PORT}`);
