@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  agent:
+    build: ./agent
+    container_name: llm-watch-agent
+    ports:
+      - "8080:8080"
+    environment:
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - LLAMA_API_KEY=${LLAMA_API_KEY}
+      - PORT=8080
+    networks:
+      - llm-watch
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: llm-watch-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./plugin/anglerfishlyy-llmwatch-panel/dist:/var/lib/grafana/plugins/llmwatch-panel
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=llmwatch-panel
+      - GF_DEFAULT_APP_MODE=development
+    networks:
+      - llm-watch
+    depends_on:
+      - agent
+    restart: unless-stopped
+
+networks:
+  llm-watch:
+    driver: bridge
