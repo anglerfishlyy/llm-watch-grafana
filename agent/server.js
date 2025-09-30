@@ -32,10 +32,13 @@ async function callCerebras(prompt) {
       messages: [{ role: "user", content: prompt }],
     }),
   });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Cerebras API error ${response.status}: ${text}`);
+  }
   return response.json();
 }
 
-// Utility to call Llama (placeholder if access not granted)
 async function callLlama(prompt) {
   if (!LLAMA_API_KEY) {
     return {
@@ -54,6 +57,10 @@ async function callLlama(prompt) {
       messages: [{ role: "user", content: prompt }],
     }),
   });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Llama API error ${response.status}: ${text}`);
+  }
   return response.json();
 }
 
