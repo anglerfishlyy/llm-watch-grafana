@@ -1,112 +1,101 @@
-require('dotenv').config();
-import express, { json } from 'express';
-import { parseUsage, estimateTokensFromText } from './tokenUtils';
-const app = express();
-app.use(json());
+import express from "express";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
+import { performance } from "perf_hooks";
+import { calculateTokens } from "./tokenUtils.js";
 
-// Allow Grafana dev server in the browser to fetch
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  next();
-});
+dotenv.config();
+
+const app = express();
+app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
-const metrics = []; // simple in-memory store for hackathon
+const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
+const CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions";
 
-// helper: perform model call using configured endpoint & key
-async function makeModelCall(prompt) {
-  const endpoint = process.env.LLAMA_ENDPOINT || '';
-  if (!endpoint) throw new Error('LLAMA_ENDPOINT not set in .env');
+// in-memory store
+let metrics = [];
 
-  const model = process.env.MODEL || 'llama-4-scout-17b-16e-instruct';
-  const apiKey = process.env.LLAMA_API_KEY || '';
+app.post("/call", async (req, res) => {
+  const { prompt } = req.body;
+  const start = performance.now();
 
-  const body = {
-    model,
-    messages: [{ role: 'user', content: prompt }],
-  };
-
-  const start = Date.now();
-  let data;
-  let latency;
   try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
+    const response = await fetch(CEREBRAS_API_URL, {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
+        "Authorization": `Bearer ${CEREBRAS_API_KEY}`,
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        model: "llama3.1-8b", // change to the model you want
+        messages: [{ role: "user", content: prompt }],
+      }),
     });
-    data = await res.json();
-    latency = Date.now() - start;
-  } catch (err) {
-    latency = Date.now() - start;
-    data = { error: String(err) };
-  }
 
-  // extract completion text if available (providers vary)
-  const completionText =
-    data?.choices?.[0]?.message?.content ??
-    data?.choices?.[0]?.text ??
-    data?.output?.text ??
-    '';
+    const json = await response.json();
+    const latency = performance.now() - start;
 
-  const usage = data?.usage ?? data?.usage_stats ?? null;
-  const { tokens_in, tokens_out } = parseUsage(usage, prompt, completionText);
-  const costPerToken = parseFloat(process.env.COST_PER_TOKEN || '0');
-  const cost = costPerToken ? (tokens_in + tokens_out) * costPerToken : 0;
+    const usage = json.usage || {};
+    const promptTokens = usage.prompt_tokens ?? calculateTokens(prompt);
+    const completionTokens =
+      usage.completion_tokens ?? calculateTokens(json.choices?.[0]?.message?.content || "");
+    const totalTokens = promptTokens + completionTokens;
 
-  const entry = {
-    ts: Date.now(),
-    latency_ms: latency,
-    tokens_in,
-    tokens_out,
-    cost,
-    error: data?.error ?? null,
-    raw: data, // raw response for debugging (careful with size)
-  };
-
-  metrics.push(entry);
-  return entry;
-}
-
-// POST /call  -> trigger model call with { prompt: "..." }
-app.post('/call', async (req, res) => {
-  const prompt = req.body.prompt || req.query.prompt || 'Hello';
-  try {
-    const entry = await makeModelCall(prompt);
-    // return a compact view to the caller
-    res.json({
-      ts: entry.ts,
-      latency_ms: entry.latency_ms,
-      tokens_in: entry.tokens_in,
-      tokens_out: entry.tokens_out,
-      cost: entry.cost,
-      error: entry.error,
-    });
-  } catch (err) {
     const entry = {
-      ts: Date.now(),
-      latency_ms: null,
-      tokens_in: 0,
-      tokens_out: 0,
+      timestamp: Date.now(),
+      latency,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      cost: totalTokens * 0.000001, // placeholder rate
+      error: null,
+    };
+
+    metrics.push(entry);
+    if (metrics.length > 100) metrics.shift();
+
+    res.json({ output: json.choices?.[0]?.message?.content, metrics: entry });
+  } catch (err) {
+    const latency = performance.now() - start;
+    const entry = {
+      timestamp: Date.now(),
+      latency,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
       cost: 0,
-      error: String(err),
+      error: err.message,
     };
     metrics.push(entry);
-    res.status(500).json({ error: String(err) });
+
+    res.status(500).json({ error: err.message });
   }
 });
 
-// GET /metrics/latest -> last N series
-app.get('/metrics/latest', (req, res) => {
-  const lastN = parseInt(req.query.n || '50', 10);
-  res.json({ series: metrics.slice(-lastN) });
+app.get("/metrics/latest", (req, res) => {
+  res.json(metrics.slice(-1)[0] || {});
 });
 
-// health
-app.get('/health', (req, res) => res.json({ ok: true, entries: metrics.length }));
+app.get("/metrics/all", (req, res) => {
+  res.json(metrics);
+});
 
-app.listen(PORT, () => console.log(`Agent running on ${PORT}`));
+app.get("/metrics/aggregates", (req, res) => {
+  const last10 = metrics.slice(-10);
+  const avgLatency = last10.reduce((a, m) => a + m.latency, 0) / last10.length;
+  const avgCost = last10.reduce((a, m) => a + m.cost, 0) / last10.length;
+  const errorRate =
+    last10.filter((m) => m.error !== null).length / (last10.length || 1);
+
+  res.json({
+    avgLatency,
+    avgCost,
+    errorRate,
+  });
+});
+
+
+app.listen(PORT, () => {
+  console.log(`Agent running on http://localhost:${PORT}`);
+});
