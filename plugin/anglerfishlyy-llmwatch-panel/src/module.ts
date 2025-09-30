@@ -12,19 +12,31 @@ interface Metrics {
   error: string | null;
 }
 
+interface Aggregates {
+  avgLatency: number;
+  avgCost: number;
+  errorRate: number;
+}
+
 interface Options {
   provider: "cerebras" | "llama";
 }
 
 export const LLMWatchPanel: React.FC<PanelProps<Options>> = ({ options }) => {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [aggregates, setAggregates] = useState<Aggregates | null>(null);
 
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch("http://localhost:8080/metrics/latest");
-        const data = await res.json();
-        setMetrics(data);
+        const [latestRes, aggRes] = await Promise.all([
+          fetch("http://localhost:8080/metrics/latest"),
+          fetch("http://localhost:8080/metrics/aggregates"),
+        ]);
+        const latest = await latestRes.json();
+        const agg = await aggRes.json();
+        setMetrics(latest);
+        setAggregates(agg);
       } catch (err) {
         console.error(err);
       }
@@ -44,24 +56,15 @@ export const LLMWatchPanel: React.FC<PanelProps<Options>> = ({ options }) => {
       <p>Total tokens: {metrics.totalTokens}</p>
       <p>Cost: ${metrics.cost.toFixed(6)}</p>
       {metrics.error && <p className="text-red-500">Error: {metrics.error}</p>}
+
+      {aggregates && (
+        <div className="mt-4">
+          <h3 className="font-semibold">Aggregates (last 10)</h3>
+          <p>Avg latency: {aggregates.avgLatency.toFixed(2)} ms</p>
+          <p>Avg cost: ${aggregates.avgCost.toFixed(6)}</p>
+          <p>Error rate: {(aggregates.errorRate * 100).toFixed(1)}%</p>
+        </div>
+      )}
     </div>
   );
-};
-
-// Panel options editor
-export const panelPluginOptions = {
-  optionsBuilder: (builder: any) => {
-    builder
-      .addRadio({
-        path: "provider",
-        name: "Provider",
-        settings: {
-          options: [
-            { value: "cerebras", label: "Cerebras" },
-            { value: "llama", label: "Meta Llama" },
-          ],
-        },
-        defaultValue: "cerebras",
-      });
-  },
 };
