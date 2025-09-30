@@ -274,15 +274,16 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
       padding: theme.spacing(2),
       background: 'transparent',
       overflowY: 'auto',
-      overflowX: 'hidden',
+      overflowX: 'auto',
       fontFamily: theme.typography.fontFamily
     }}>
       {/* Primary Metrics */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: latest.error ? 'repeat(auto-fit, minmax(220px, 1fr))' : 'repeat(3, 1fr)',
+        gridTemplateColumns: latest.error ? 'repeat(4, minmax(220px, 1fr))' : 'repeat(3, minmax(220px, 1fr))',
         gap: theme.spacing(2),
-        marginBottom: theme.spacing(2)
+        marginBottom: theme.spacing(2),
+        minWidth: latest.error ? '920px' : '700px'
       }}>
         <MetricCard
           title="Response Latency"
@@ -325,9 +326,10 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
       {aggregates && showAggregates && (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(3, minmax(200px, 1fr))',
           gap: theme.spacing(2),
-          marginBottom: theme.spacing(2)
+          marginBottom: theme.spacing(2),
+          minWidth: '620px'
         }}>
           <div style={{
             padding: theme.spacing(2),
@@ -419,8 +421,9 @@ export const LLMWatchPanel: React.FC<PanelProps> = ({ width, height }) => {
       {showCharts && (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: height > 500 ? 'repeat(2, 1fr)' : '1fr',
-          gap: theme.spacing(2)
+          gridTemplateColumns: height > 500 ? 'repeat(2, minmax(400px, 1fr))' : '1fr',
+          gap: theme.spacing(2),
+          minWidth: height > 500 ? '820px' : '400px'
         }}>
           <div style={{ 
             padding: theme.spacing(2),
