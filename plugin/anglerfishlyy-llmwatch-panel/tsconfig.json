@@ -1,3 +1,10 @@
 {
-  "extends": "./.config/tsconfig.json"
+  "extends": "./.config/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",                  // ✅ Enable JSX for React 17+
+    "esModuleInterop": true,             // ✅ Allow default imports from CJS
+    "allowSyntheticDefaultImports": true // ✅ Helps with @types/react imports
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
 }

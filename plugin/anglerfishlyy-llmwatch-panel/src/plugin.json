@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
   "type": "panel",
-  "name": "Llm-Watch-Panel",
+  "name": "LLM Watch Panel",
   "id": "anglerfishlyy-llmwatch-panel",
   "info": {
-    "keywords": ["panel"],
-    "description": "",
+    "keywords": ["panel", "llm", "metrics", "cerebras", "grafana"],
+    "description": "A Grafana panel to monitor latency, tokens, costs, and errors from LLM API calls (Cerebras, Llama, etc).",
     "author": {
       "name": "Anglerfishlyy"
     },
@@ -13,13 +13,23 @@
       "small": "img/logo.svg",
       "large": "img/logo.svg"
     },
-    "links": [],
+    "links": [
+      { "name": "GitHub", "url": "https://github.com/anglerfishlyy/llm-watch-grafana" }
+    ],
     "screenshots": [],
-    "version": "%VERSION%",
-    "updated": "%TODAY%"
+    "version": "1.0.0",
+    "updated": "2025-09-29"
   },
   "dependencies": {
     "grafanaDependency": ">=10.4.0",
     "plugins": []
-  }
+  },
+  "includes": [
+    {
+      "type": "panel",
+      "name": "LLM Watch Panel",
+      "component": "LLMWatchPanel"
+    }
+  ],
+  "module": "src/module.tsx"
 }

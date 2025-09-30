@@ -3,17 +3,19 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import { performance } from "perf_hooks";
 import { calculateTokens } from "./tokenUtils.js";
+import cors from "cors";
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
-
+app.use(cors({
+  origin: "http://localhost:3000"
+}));
 const PORT = process.env.PORT || 8080;
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
 const LLAMA_API_KEY = process.env.LLAMA_API_KEY; // placeholder for Meta
 const CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions";
-// If Meta Llama API is approved, update this:
 const LLAMA_API_URL = "https://api.llama.meta/v1/chat/completions";
 
 // in-memory store
@@ -64,6 +66,33 @@ async function callLlama(prompt) {
   return response.json();
 }
 
+// Generate random demo metrics
+function generateDemoMetrics() {
+  const latency = 50 + Math.random() * 200; // 50-250ms
+  const promptTokens = Math.floor(Math.random() * 100);
+  const completionTokens = Math.floor(Math.random() * 150);
+  const totalTokens = promptTokens + completionTokens;
+  const cost = totalTokens * 0.000001;
+
+  const entry = {
+    timestamp: Date.now(),
+    provider: "demo",
+    latency,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    cost,
+    error: null,
+  };
+
+  metrics.push(entry);
+  if (metrics.length > 100) metrics.shift();
+}
+
+// Auto-generate demo metrics every 3s
+setInterval(generateDemoMetrics, 3000);
+
+// Existing call endpoint
 app.post("/call", async (req, res) => {
   const { provider = "cerebras", prompt } = req.body;
   const start = performance.now();
@@ -77,12 +106,10 @@ app.post("/call", async (req, res) => {
     }
 
     const latency = performance.now() - start;
-
     const usage = json.usage || {};
     const promptTokens = usage.prompt_tokens ?? calculateTokens(prompt);
     const completionTokens =
-      usage.completion_tokens ??
-      calculateTokens(json.choices?.[0]?.message?.content || "");
+      usage.completion_tokens ?? calculateTokens(json.choices?.[0]?.message?.content || "");
     const totalTokens = promptTokens + completionTokens;
 
     const entry = {
@@ -92,7 +119,7 @@ app.post("/call", async (req, res) => {
       promptTokens,
       completionTokens,
       totalTokens,
-      cost: totalTokens * 0.000001, // placeholder rate
+      cost: totalTokens * 0.000001,
       error: null,
     };
 
@@ -113,7 +140,6 @@ app.post("/call", async (req, res) => {
       error: err.message,
     };
     metrics.push(entry);
-
     res.status(500).json({ error: err.message });
   }
 });
