@@ -9,7 +9,25 @@ services:
     environment:
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
       - LLAMA_API_KEY=${LLAMA_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - PORT=8080
+    networks:
+      - llm-watch
+    restart: unless-stopped
+
+  mcp-gateway:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: llm-watch-mcp-gateway
+    command: node mcp_gateway.js
+    ports:
+      - "8081:8081"
+    environment:
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - LLAMA_API_KEY=${LLAMA_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - MCP_GATEWAY_PORT=8081
     networks:
       - llm-watch
     restart: unless-stopped

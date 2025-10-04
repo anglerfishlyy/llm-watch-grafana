@@ -5,7 +5,7 @@
   "id": "anglerfishlyy-llmwatch-panel",
   "info": {
     "keywords": ["panel", "llm", "metrics", "cerebras", "grafana"],
-  "description": "LLM Watch Panel: visualizes latency, token usage, cost, and errors from LLM requests. Supports demo JSON from the agent and Prometheus time-series queries.",
+  "description": "Visualize and monitor LLM metrics from the Agent",
     "author": {
       "name": "Anglerfishlyy"
     },
@@ -19,8 +19,8 @@
     "screenshots": [
       {
         "name": "Panel preview",
-  "path": "img/screenshot.png",
-        "caption": "Placeholder panel screenshot — replace with real screenshots before publishing"
+        "path": "img/screenshot.png",
+        "caption": "LLM Watch panel showing latency, cost, and token usage (demo data)"
       }
     ],
     "version": "1.0.0",

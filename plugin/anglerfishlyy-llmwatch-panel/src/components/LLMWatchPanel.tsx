@@ -1,25 +1,11 @@
-import React, { useEffect, useState } from "react";
-import { DataQueryRequest, DataQueryResponse } from '@grafana/data';
-import { getDataSourceSrv } from '@grafana/runtime';
-import { dateTime } from '@grafana/data';
-import { PanelProps, PanelPlugin } from "@grafana/data";
+import React, { useEffect, useState, useRef } from "react";
+import { PanelProps, PanelPlugin, dateTime } from "@grafana/data";
+import { getDataSourceSrv, getBackendSrv } from "@grafana/runtime";
 import { useTheme2, Badge } from "@grafana/ui";
-import {
-  LineChart,
-  Line,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  Legend,
-  Area,
-  AreaChart,
-} from "recharts";
+import { ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { TrendingUp, TrendingDown, AlertCircle, Activity, DollarSign, Layers } from "lucide-react";
 
+// Define panel options interface
 interface LLMWatchOptions {
   showSparklines: boolean;
   latencyThresholdWarning: number;
@@ -28,6 +14,7 @@ interface LLMWatchOptions {
   costThresholdCritical: number;
 }
 
+// Default options
 const defaultOptions: LLMWatchOptions = {
   showSparklines: true,
   latencyThresholdWarning: 100,
@@ -36,849 +23,182 @@ const defaultOptions: LLMWatchOptions = {
   costThresholdCritical: 0.0002,
 };
 
-export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({ 
-  options, 
-  data, 
-  width, 
-  height 
-}) => {
-  const theme = useTheme2();
 
-  // Choose agent host dynamically: use localhost when developing locally, otherwise use the service name
-  const AGENT_URL =
-    (typeof window !== 'undefined' && window.location && window.location.hostname === 'localhost')
-      ? 'http://localhost:8080/metrics/all'
-      : 'http://agent:8080/metrics/all';
+    export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({ options = defaultOptions, width = 600, height = 400 }) => {
+      const theme = useTheme2();
+      const [metricsState, setMetricsState] = useState<any[]>([]);
+      const [fetchError, setFetchError] = useState<string | null>(null);
+      const [selectedProvider, setSelectedProvider] = useState<'all' | 'cerebras' | 'llama' | 'mcp'>('all');
+      const [insightText, setInsightText] = useState<string | null>(null);
+      const [insightLoading, setInsightLoading] = useState(false);
+      const [lastDataSource, setLastDataSource] = useState<'agent' | 'prometheus' | null>(null);
+      const [domReady, setDomReady] = useState(false);
+      const isMountedRef = useRef(true);
 
-  // Fetch live metrics from the agent backend (inside Docker use service name 'agent')
-  const [metricsState, setMetricsState] = useState<any[]>([]);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  // Track which data source was last used to populate the UI
-  const [lastDataSource, setLastDataSource] = useState<'agent' | 'prometheus' | null>(null);
+      const AGENT_LOCAL = 'http://localhost:8080/metrics/all';
 
-  useEffect(() => {
-    let mounted = true;
+      useEffect(() => {
+        isMountedRef.current = true;
+        let mounted = true;
 
-    const fetchMetrics = async () => {
-      try {
-        const resp = await fetch(AGENT_URL);
-        if (!resp.ok) {
-          if (mounted) setFetchError(`Agent responded with status ${resp.status}`);
-          return;
-        }
-        const json = await resp.json();
-        const arr = json.metrics || [];
-        if (Array.isArray(arr)) {
-            if (mounted) {
-            setMetricsState(arr);
-            setFetchError(null);
-            setLastDataSource('agent');
-            try {
-              // Debug log so Grafana console shows agent path usage
-              // eslint-disable-next-line no-console
-              console.log('LLMWatchPanel: fetched metrics from agent endpoint', AGENT_URL, 'count=', arr.length);
-            } catch (e) {
-              // ignore logging errors in panel runtime
-            }
-          }
-        } else {
-          if (mounted) setFetchError('Invalid metrics payload');
-        }
-      } catch (err) {
-        if (mounted) setFetchError('Error fetching metrics');
-      }
-    };
-
-    fetchMetrics();
-    const iv = setInterval(fetchMetrics, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(iv);
-    };
-  }, []);
-
-  // normalize fetched metrics to expected shape
-  const metrics: any[] = (metricsState || []).map((m: any) => ({
-    timestamp: m.timestamp ?? m.time ?? Date.now(),
-    provider: m.provider ?? 'unknown',
-    latency: Number(m.latency ?? 0),
-    promptTokens: Number(m.promptTokens ?? m.prompt_tokens ?? 0),
-    completionTokens: Number(m.completionTokens ?? m.completion_tokens ?? 0),
-    totalTokens: Number(m.totalTokens ?? m.total_tokens ?? m.total ?? 0),
-    cost: Number(m.cost ?? 0),
-    error: m.error ?? null,
-  }));
-
-  // Prometheus series (via Grafana datasource) for rate queries
-  const [promSeries, setPromSeries] = useState<Array<{ name: string; points: { timestamp: number; value: number }[] }>>([]);
-  const [promLoading, setPromLoading] = useState(false);
-  const [promError, setPromError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const fetchViaDatasource = async (expr: string) => {
-      setPromError(null);
-      setPromLoading(true);
-      try {
-        const ds = await getDataSourceSrv().get('Prometheus');
-        const now = Date.now();
-
-        const req: DataQueryRequest = {
-          range: { from: dateTime(new Date(now - 5 * 60 * 1000).toISOString()), to: dateTime(new Date(now).toISOString()) },
-          targets: [{ refId: 'A', expr } as any],
-        } as any;
-
-        const res = (await ds.query(req)) as DataQueryResponse;
-
-        const series: Array<{ name: string; points: { timestamp: number; value: number }[] }> = [];
-
-        if (res && Array.isArray(res.data)) {
-          for (const frame of res.data as any[]) {
-            const fields = frame.fields || [];
-            const timeFieldIndex = fields.findIndex((f: any) => f.type === 'time' || f.name === 'time');
-            const valueFieldIndex = fields.findIndex((f: any) => f.type === 'number' || f.type === 'float' || f.type === 'double' || f.type === 'int');
-
-            if (timeFieldIndex === -1 || valueFieldIndex === -1) {
-              continue;
-            }
-
-            const timeField = fields[timeFieldIndex];
-            const valueField = fields[valueFieldIndex];
-
-            const timeVals = timeField.values && (timeField.values.toArray ? timeField.values.toArray() : timeField.values);
-            const valVals = valueField.values && (valueField.values.toArray ? valueField.values.toArray() : valueField.values);
-
-            if (!Array.isArray(timeVals) || !Array.isArray(valVals)) continue;
-
-            const pts: { timestamp: number; value: number }[] = [];
-            const len = Math.min(timeVals.length, valVals.length);
-            for (let i = 0; i < len; i++) {
-              const t = new Date(timeVals[i]).getTime();
-              const v = Number(valVals[i]);
-              if (!Number.isFinite(v) || Number.isNaN(t)) continue;
-              pts.push({ timestamp: t, value: v });
-            }
-
-            if (pts.length === 0) continue;
-
-            const name = frame.name || (valueField.labels ? Object.entries(valueField.labels).map(([k, v]) => `${k}=${v}`).join(',') : `series_${series.length}`);
-            series.push({ name, points: pts });
-          }
-        }
-
-        if (mounted) {
-          setPromSeries(series);
-          setLastDataSource('prometheus');
+        const fetchMetrics = async () => {
           try {
-            // Debug log so Grafana console shows Prometheus path usage
-            // eslint-disable-next-line no-console
-            console.log('LLMWatchPanel: fetched metrics from Prometheus datasource, expr=', expr, 'seriesCount=', series.length);
-          } catch (e) {}
-        }
-      } catch (err: any) {
-        if (mounted) {
-          setPromError(err && err.message ? String(err.message) : 'Error querying datasource');
-          setPromSeries([]);
-        }
-      } finally {
-        if (mounted) setPromLoading(false);
+            const useProxy = typeof window !== 'undefined' && window.location && window.location.hostname !== 'localhost';
+            let json: any = null;
+            if (useProxy) {
+              try {
+                const ds = await getDataSourceSrv().get('Prometheus');
+                const idOrUid = (ds && (ds.uid || ds.id)) || 'Prometheus';
+                const path = `/api/datasources/proxy/${idOrUid}/metrics/all`;
+                json = await getBackendSrv().get(path);
+                setLastDataSource('agent');
+              } catch (err: any) {
+                setFetchError(String(err?.message || err || 'proxy error'));
+                return;
+              }
+            } else {
+              const resp = await fetch(AGENT_LOCAL);
+              if (!resp.ok) { setFetchError(`Agent returned ${resp.status}`); return; }
+              json = await resp.json();
+              setLastDataSource('agent');
+            }
+
+            const arr = json?.metrics || [];
+            if (Array.isArray(arr)) setMetricsState(arr);
+            else setFetchError('Invalid metrics payload');
+          } catch (err: any) {
+            setFetchError(String(err?.message || err || 'fetch error'));
+          }
+        };
+
+        fetchMetrics();
+        const iv = setInterval(fetchMetrics, 5000);
+        setDomReady(true);
+        return () => { mounted = false; isMountedRef.current = false; clearInterval(iv); };
+      }, []);
+
+      const metrics = (metricsState || []).map((m: any) => ({
+        timestamp: m.timestamp ?? m.time ?? Date.now(),
+        provider: m.provider ?? 'unknown',
+        model: m.model ?? 'default',
+        latency: Number(m.latency ?? 0),
+        promptTokens: Number(m.promptTokens ?? m.prompt_tokens ?? 0),
+        completionTokens: Number(m.completionTokens ?? m.completion_tokens ?? 0),
+        totalTokens: Number(m.totalTokens ?? m.total_tokens ?? m.total ?? 0),
+        cost: Number(m.cost ?? 0),
+        error: m.error ?? null,
+      }));
+
+      if (!metrics || metrics.length === 0) {
+        return (
+          <div style={{ width: width || '100%', height: height || '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', color: theme.colors.text.secondary, boxSizing: 'border-box' }}>
+            <div style={{ textAlign: 'center' }}>{fetchError ? `Error: ${fetchError}` : 'No data yet'}</div>
+          </div>
+        );
       }
-    };
 
-    if (options && (options as any).usePrometheus) {
-      const expr = (options as any).promQuery || 'rate(http_requests_total[5m])';
-      fetchViaDatasource(expr);
-      const iv = setInterval(() => fetchViaDatasource(expr), 5000);
-      return () => {
-        mounted = false;
-        clearInterval(iv);
-      };
-    }
-    return () => { mounted = false; };
-  }, [options]);
+      const latest = metrics[metrics.length - 1];
+      const formatted = metrics.map((m) => ({ ...m, time: new Date(m.timestamp).toLocaleTimeString() }));
 
-  if (!metrics || metrics.length === 0) {
-    return (
-      <div 
-        style={{ 
-          width,
-          height,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-          color: theme.colors.text.secondary,
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>{fetchError ? 'Error fetching metrics' : 'No data yet'}</div>
-      </div>
-    );
-  }
-
-  if (metrics.length === 0) {
-    return (
-      <div 
-        style={{ 
-          width,
-          height,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-        }}
-      >
-        <div style={{ textAlign: 'center', color: theme.colors.text.secondary }}>
-          No metric data available
+      const MetricCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode; color: string; subtitle?: string; warning?: boolean }> = ({ title, value, icon, color, subtitle }) => (
+        <div style={{ background: theme.colors.background.secondary, border: `1px solid ${theme.colors.border.weak}`, borderRadius: theme.shape.radius.default, padding: theme.spacing(2) }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing(1) }}>
+            <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${color}22`, borderRadius: 6 }}>{React.cloneElement(icon as React.ReactElement, { size: 18, style: { color } })}</div>
+            <div>
+              <div style={{ fontSize: theme.typography.bodySmall.fontSize, color: theme.colors.text.secondary }}>{title}</div>
+              <div style={{ fontSize: theme.typography.h3.fontSize, color: theme.colors.text.primary }}>{value}</div>
+              {subtitle && <div style={{ fontSize: theme.typography.bodySmall.fontSize, color: theme.colors.text.secondary }}>{subtitle}</div>}
+            </div>
+          </div>
         </div>
-      </div>
-    );
-  }
+      );
 
-  const latest = metrics[metrics.length - 1];
-  const formatted = metrics.map((m) => ({
-    ...m,
-    time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-  }));
+      const containerStyle: React.CSSProperties = { width: width || '100%', height: height || '100%', display: 'flex', flexDirection: 'column', padding: 12, overflow: 'auto', boxSizing: 'border-box' };
 
-  // promSeries is used directly in charts below
+      const requestInsight = async () => {
+        setInsightLoading(true); setInsightText(null);
+        try {
+          const useProxy = typeof window !== 'undefined' && window.location && window.location.hostname !== 'localhost';
+          const payload = { provider: 'llama', prompt: `Summarize recent metrics:\n${metrics.slice(-10).map(m => `${m.provider}/${m.model}: ${m.latency}ms`).join('\n')}`, model: 'llama-3-8b-chat' };
+          let respJson: any = null;
+          if (useProxy) { respJson = await getBackendSrv().post('/api/datasources/proxy/Prometheus/call', payload); }
+          else { const r = await fetch('http://localhost:8080/call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); respJson = await r.json(); }
+          setInsightText(String(respJson?.output || respJson?.response || JSON.stringify(respJson)).slice(0, 800));
+        } catch (err: any) { setInsightText(String(err?.message || err || 'error')); } finally { setInsightLoading(false); }
+      };
 
-  // Calculate aggregates from last 10 records
-  const last10 = metrics.slice(-10);
-  const aggregates = {
-    avgLatency: last10.reduce((sum, m) => sum + m.latency, 0) / last10.length,
-    avgCost: last10.reduce((sum, m) => sum + m.cost, 0) / last10.length,
-    errorRate: last10.filter(m => m.error).length / last10.length,
-  };
+      return (
+        <div style={containerStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <div style={{ minWidth: 220 }}>
+              <label style={{ color: theme.colors.text.secondary, fontSize: theme.typography.bodySmall.fontSize }}>Provider</label>
+              <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value as any)} style={{ width: '100%', marginTop: 6 }}>
+                <option value="all">All (combined)</option>
+                <option value="cerebras">Cerebras</option>
+                <option value="llama">Meta Llama</option>
+                <option value="mcp">MCP Gateway</option>
+              </select>
+            </div>
+            {lastDataSource && <Badge text={`data: ${lastDataSource}`} color={lastDataSource === 'agent' ? 'blue' : 'purple'} />}
+          </div>
 
-  const getColor = (val: number, thresholds: [number, number]) => {
-    if (val > thresholds[1]) return theme.visualization.getColorByName('red');
-    if (val > thresholds[0]) return theme.visualization.getColorByName('orange');
-    return theme.visualization.getColorByName('green');
-  };
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
+            <MetricCard title="Latency" value={`${latest.latency.toFixed(0)} ms`} icon={<Activity />} color={theme.visualization.getColorByName('red')} />
+            <MetricCard title="Cost" value={`$${latest.cost?.toFixed?.(4) ?? '0.0000'}`} icon={<DollarSign />} color={theme.visualization.getColorByName('green')} />
+            <MetricCard title="Tokens" value={`${latest.totalTokens ?? 0}`} icon={<Layers />} color={theme.visualization.getColorByName('blue')} />
+          </div>
 
-  const getTrend = (current: number, previous: number) => {
-    if (!previous) return null;
-    const change = ((current - previous) / previous) * 100;
-    return {
-      value: Math.abs(change).toFixed(1),
-      isUp: change > 0,
-      color: change > 0 ? theme.visualization.getColorByName('red') : theme.visualization.getColorByName('green')
-    };
-  };
-
-  const prevLatency = metrics.length > 1 ? metrics[metrics.length - 2].latency : latest.latency;
-  const prevCost = metrics.length > 1 ? metrics[metrics.length - 2].cost : latest.cost;
-  
-  const latencyTrend = getTrend(latest.latency, prevLatency);
-  const costTrend = getTrend(latest.cost, prevCost);
-
-  // Responsive sizing based on Grafana standards
-  const showSparklines = options.showSparklines && height >= 200;
-  const showCharts = height > 350;
-  const showAggregates = height > 250;
-
-  const MetricCard: React.FC<{
-    title: string;
-    value: string | number;
-    icon: React.ReactNode;
-    sparkKey?: string;
-    color: string;
-    trend?: { value: string; isUp: boolean; color: string } | null;
-    subtitle?: string;
-    warning?: boolean;
-  }> = ({ title, value, icon, sparkKey, color, trend, subtitle, warning }) => (
-    <div
-      style={{
-        background: theme.colors.background.secondary,
-        border: `1px solid ${warning ? theme.visualization.getColorByName('red') : theme.colors.border.weak}`,
-        borderRadius: theme.shape.radius.default,
-        padding: theme.spacing(2),
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        transition: 'all 0.2s ease',
-      }}
-    >
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'flex-start', 
-        justifyContent: 'space-between',
-        marginBottom: theme.spacing(1.5)
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing(1.5), flex: 1, minWidth: 0 }}>
-          <div 
-            style={{ 
-              background: `${color}15`,
-              padding: theme.spacing(1),
-              borderRadius: theme.shape.radius.default,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0
-            }}
-          >
-            {React.cloneElement(icon as React.ReactElement, { 
-              size: 20, 
-              style: { color } 
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            {['cerebras', 'llama', 'mcp'].map((p) => {
+              const list = metrics.filter((m) => m.provider === p);
+              const latestP = list[list.length - 1] || null;
+              return (
+                <div key={p} style={{ minWidth: 200, padding: 12, background: theme.colors.background.secondary, border: `1px solid ${theme.colors.border.weak}`, borderRadius: 6 }}>
+                  <div style={{ fontSize: theme.typography.bodySmall.fontSize, color: theme.colors.text.secondary }}>{p.toUpperCase()}</div>
+                  <div style={{ fontSize: theme.typography.h3.fontSize, color: theme.colors.text.primary }}>{latestP ? `${latestP.latency.toFixed(0)} ms` : '—'}</div>
+                  <div style={{ color: theme.colors.text.secondary }}>{latestP ? `${latestP.totalTokens} tokens • $${latestP.cost?.toFixed?.(5) ?? '0.00000'}` : ''}</div>
+                </div>
+              );
             })}
           </div>
-          <div style={{ minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ 
-              fontSize: theme.typography.bodySmall.fontSize,
-              fontWeight: theme.typography.fontWeightMedium,
-              color: theme.colors.text.secondary,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              fontFamily: theme.typography.fontFamily
-            }}>
-              {title}
-            </div>
-            {subtitle && (
-              <div style={{ 
-                fontSize: theme.typography.bodySmall.fontSize,
-                color: theme.colors.text.disabled,
-                fontFamily: theme.typography.fontFamily
-              }}>
-                {subtitle}
+
+          <div style={{ padding: 12, background: theme.colors.background.secondary, border: `1px solid ${theme.colors.border.weak}`, borderRadius: 6, marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: theme.typography.h5.fontSize, fontWeight: theme.typography.h5.fontWeight }}>AI Insights</div>
+              <div>
+                <button onClick={requestInsight} disabled={insightLoading} style={{ padding: '6px 10px', borderRadius: 4 }}>{insightLoading ? 'Thinking…' : 'Generate'}</button>
               </div>
+            </div>
+            <div style={{ color: theme.colors.text.secondary, minHeight: 60 }}>{insightText || 'Click Generate to ask the LLM for a summary of recent metrics.'}</div>
+          </div>
+
+          <div style={{ padding: 12, background: theme.colors.background.secondary, border: `1px solid ${theme.colors.border.weak}`, borderRadius: 6 }}>
+            <div style={{ fontSize: theme.typography.h5.fontSize, fontWeight: theme.typography.h5.fontWeight, marginBottom: 8 }}>Token Usage Distribution</div>
+            {domReady ? (
+              <ResponsiveContainer width="100%" height={Math.min(280, height - 220)}>
+                <BarChart data={formatted}>
+                  <CartesianGrid stroke={theme.colors.border.weak} strokeDasharray="3 3" />
+                  <XAxis dataKey="time" stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
+                  <YAxis stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
+                  <Tooltip contentStyle={{ backgroundColor: theme.colors.background.primary, borderColor: theme.colors.border.medium, color: theme.colors.text.primary, borderRadius: theme.shape.radius.default, fontSize: theme.typography.bodySmall.fontSize }} />
+                  <Legend wrapperStyle={{ fontSize: theme.typography.bodySmall.fontSize, fontWeight: theme.typography.fontWeightMedium }} />
+                  <Bar dataKey="promptTokens" fill={theme.visualization.getColorByName('blue')} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="completionTokens" fill={theme.visualization.getColorByName('green')} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ color: theme.colors.text.secondary }}>Preparing chart…</div>
             )}
           </div>
         </div>
-        {warning && (
-          <Badge 
-            text="Alert"
-            color="red" 
-            icon="exclamation-triangle"
-            style={{ flexShrink: 0 }}
-          />
-        )}
-      </div>
-      
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'baseline', 
-        justifyContent: 'space-between',
-        marginBottom: showSparklines && sparkKey ? theme.spacing(1.5) : 0,
-        gap: theme.spacing(2)
-      }}>
-        <div style={{ 
-          fontSize: theme.typography.h2.fontSize,
-          fontWeight: theme.typography.h2.fontWeight,
-          color: color,
-          lineHeight: theme.typography.h2.lineHeight,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          fontFamily: theme.typography.fontFamily
-        }}>
-          {value}
-        </div>
-        {trend && (
-          <div 
-            style={{ 
-              display: 'flex',
-              alignItems: 'center',
-              gap: theme.spacing(0.5),
-              fontSize: theme.typography.bodySmall.fontSize,
-              color: trend.color,
-              fontWeight: theme.typography.fontWeightMedium,
-              flexShrink: 0,
-              fontFamily: theme.typography.fontFamily
-            }}
-          >
-            {trend.isUp ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-            {trend.value}%
-          </div>
-        )}
-      </div>
+      );
+    };
 
-      {sparkKey && showSparklines && (
-        <div style={{ height: 60, marginTop: 'auto' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={formatted}>
-              <defs>
-                <linearGradient id={`gradient-${sparkKey}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={color} stopOpacity={0.4}/>
-                  <stop offset="95%" stopColor={color} stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <Area 
-                type="monotone" 
-                dataKey={sparkKey} 
-                stroke={color} 
-                strokeWidth={2} 
-                fill={`url(#gradient-${sparkKey})`}
-                dot={false} 
-                isAnimationActive={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </div>
-  );
-
-  const latencyColor = getColor(latest.latency, [options.latencyThresholdWarning, options.latencyThresholdCritical]);
-  const costColor = getColor(latest.cost, [options.costThresholdWarning, options.costThresholdCritical]);
-
-  return (
-    <div style={{ 
-      width,
-      height,
-      padding: theme.spacing(2),
-      background: 'transparent',
-      overflowY: 'auto',
-      overflowX: 'auto',
-      fontFamily: theme.typography.fontFamily
-    }}>
-      {/* Data source badge + Primary Metrics */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: theme.spacing(1) }}>
-        {lastDataSource && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing(1) }}>
-            <Badge text={`data: ${lastDataSource}`} color={lastDataSource === 'agent' ? 'blue' : 'purple'} />
-          </div>
-        )}
-      </div>
-      {/* Primary Metrics */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: latest.error ? 'repeat(4, minmax(220px, 1fr))' : 'repeat(3, minmax(220px, 1fr))',
-        gap: theme.spacing(2),
-        marginBottom: theme.spacing(2),
-        minWidth: latest.error ? '920px' : '700px'
-      }}>
-        <MetricCard
-          title="Response Latency"
-          value={`${latest.latency.toFixed(0)} ms`}
-          subtitle="milliseconds"
-          icon={<Activity />}
-          sparkKey="latency"
-          color={latencyColor}
-          warning={latest.latency > options.latencyThresholdCritical}
-          trend={latencyTrend}
-        />
-        <MetricCard
-          title="Request Cost"
-          value={`$${latest.cost.toFixed(4)}`}
-          icon={<DollarSign />}
-          sparkKey="cost"
-          color={costColor}
-          warning={latest.cost > options.costThresholdCritical}
-          trend={costTrend}
-        />
-        <MetricCard 
-          title="Total Tokens" 
-          value={latest.totalTokens.toLocaleString()} 
-          icon={<Layers />}
-          sparkKey="totalTokens"
-          color={theme.visualization.getColorByName('blue')}
-        />
-        {latest.error && (
-          <MetricCard 
-            title="Error Status" 
-            value={latest.error}
-            icon={<AlertCircle />}
-            color={theme.visualization.getColorByName('red')}
-            warning
-          />
-        )}
-      </div>
-
-      {/* Aggregate Stats */}
-      {showAggregates && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, minmax(200px, 1fr))',
-          gap: theme.spacing(2),
-          marginBottom: theme.spacing(2),
-          minWidth: '620px'
-        }}>
-          <div style={{
-            padding: theme.spacing(2),
-            background: theme.colors.background.secondary,
-            border: `1px solid ${theme.colors.border.weak}`,
-            borderRadius: theme.shape.radius.default,
-          }}>
-            <div style={{ 
-              fontSize: theme.typography.bodySmall.fontSize,
-              color: theme.colors.text.secondary,
-              fontWeight: theme.typography.fontWeightMedium,
-              marginBottom: theme.spacing(1),
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              fontFamily: theme.typography.fontFamily
-            }}>
-              Avg Latency (10)
-            </div>
-            <div style={{ 
-              fontSize: theme.typography.h3.fontSize,
-              fontWeight: theme.typography.h3.fontWeight,
-              color: theme.colors.text.primary,
-              fontFamily: theme.typography.fontFamily
-            }}>
-              {aggregates.avgLatency.toFixed(0)} <span style={{ 
-                fontSize: theme.typography.body.fontSize,
-                color: theme.colors.text.secondary 
-              }}>ms</span>
-            </div>
-          </div>
-          <div style={{
-            padding: theme.spacing(2),
-            background: theme.colors.background.secondary,
-            border: `1px solid ${theme.colors.border.weak}`,
-            borderRadius: theme.shape.radius.default,
-          }}>
-            <div style={{ 
-              fontSize: theme.typography.bodySmall.fontSize,
-              color: theme.colors.text.secondary,
-              fontWeight: theme.typography.fontWeightMedium,
-              marginBottom: theme.spacing(1),
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              fontFamily: theme.typography.fontFamily
-            }}>
-              Avg Cost (10)
-            </div>
-            <div style={{ 
-              fontSize: theme.typography.h3.fontSize,
-              fontWeight: theme.typography.h3.fontWeight,
-              color: theme.colors.text.primary,
-              fontFamily: theme.typography.fontFamily
-            }}>
-              ${aggregates.avgCost.toFixed(5)}
-            </div>
-          </div>
-          <div style={{
-            padding: theme.spacing(2),
-            background: theme.colors.background.secondary,
-            border: `1px solid ${theme.colors.border.weak}`,
-            borderRadius: theme.shape.radius.default,
-          }}>
-            <div style={{ 
-              fontSize: theme.typography.bodySmall.fontSize,
-              color: theme.colors.text.secondary,
-              fontWeight: theme.typography.fontWeightMedium,
-              marginBottom: theme.spacing(1),
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              fontFamily: theme.typography.fontFamily
-            }}>
-              Error Rate
-            </div>
-            <div style={{ 
-              fontSize: theme.typography.h3.fontSize,
-              fontWeight: theme.typography.h3.fontWeight,
-              color: aggregates.errorRate > 0 
-                ? theme.visualization.getColorByName('red') 
-                : theme.visualization.getColorByName('green'),
-              fontFamily: theme.typography.fontFamily
-            }}>
-              {(aggregates.errorRate * 100).toFixed(1)}%
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Charts */}
-      {showCharts && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: height > 500 ? 'repeat(2, minmax(400px, 1fr))' : '1fr',
-          gap: theme.spacing(2),
-          minWidth: height > 500 ? '820px' : '400px'
-        }}>
-          <div style={{ 
-            padding: theme.spacing(2),
-            border: `1px solid ${theme.colors.border.weak}`,
-            borderRadius: theme.shape.radius.default,
-            background: theme.colors.background.secondary,
-          }}>
-            <h3 style={{ 
-              fontSize: theme.typography.h5.fontSize,
-              fontWeight: theme.typography.h5.fontWeight,
-              marginBottom: theme.spacing(2),
-              color: theme.colors.text.primary,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              fontFamily: theme.typography.fontFamily
-            }}>
-              Prometheus: http_requests_total rate (5m)
-            </h3>
-            <div style={{ minHeight: 140, display: 'flex', alignItems: 'center' }}>
-              {promLoading ? (
-                <div style={{ width: '100%', textAlign: 'center', color: theme.colors.text.secondary }}>Loading Prometheus data…</div>
-              ) : promError ? (
-                <div style={{ width: '100%', textAlign: 'center', color: theme.visualization.getColorByName('red') }}>{`Error: ${promError}`}</div>
-              ) : promSeries.length === 0 ? (
-                <div style={{ width: '100%', textAlign: 'center', color: theme.colors.text.secondary }}>No series found</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={Math.min(240, Math.floor((height - 350) / 2))}>
-                  {(() => {
-                    // build combined rows keyed by timestamp
-                    const timestamps = new Set<number>();
-                    for (const s of promSeries) for (const p of s.points) timestamps.add(p.timestamp);
-                    const sorted = Array.from(timestamps).sort((a, b) => a - b);
-                    const rows = sorted.map((ts) => {
-                      const r: any = { time: new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) };
-                      for (const s of promSeries) {
-                        const pt = s.points.find((x) => x.timestamp === ts);
-                        r[s.name] = pt ? pt.value : null;
-                      }
-                      return r;
-                    });
-
-                    const strokes = ['#8884d8', '#82ca9d', '#ff7300', '#413ea0', '#ff0000', '#00aaff'];
-
-                    return (
-                      <LineChart data={rows}>
-                        <CartesianGrid stroke={theme.colors.border.weak} strokeDasharray="3 3" />
-                        <XAxis dataKey="time" stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
-                        <YAxis stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: theme.colors.background.primary,
-                            borderColor: theme.colors.border.medium,
-                            color: theme.colors.text.primary,
-                            borderRadius: theme.shape.radius.default,
-                            fontSize: theme.typography.bodySmall.fontSize,
-                            fontFamily: theme.typography.fontFamily
-                          }}
-                        />
-                        <Legend />
-                        {promSeries.map((s, idx) => (
-                          <Line key={s.name} type="monotone" dataKey={s.name} stroke={strokes[idx % strokes.length]} dot={false} isAnimationActive={false} strokeWidth={2} />
-                        ))}
-                      </LineChart>
-                    );
-                  })()}
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            <h3 style={{ 
-              fontSize: theme.typography.h5.fontSize,
-              fontWeight: theme.typography.h5.fontWeight,
-              marginTop: theme.spacing(2),
-              marginBottom: theme.spacing(2),
-              color: theme.colors.text.primary,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              fontFamily: theme.typography.fontFamily
-            }}>
-              Latency Trend
-            </h3>
-            <ResponsiveContainer width="100%" height={Math.min(140, Math.floor((height - 350) / 2))}>
-              <LineChart data={formatted}>
-                <defs>
-                  <linearGradient id="latencyGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={theme.visualization.getColorByName('red')} stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor={theme.visualization.getColorByName('red')} stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke={theme.colors.border.weak} strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="time" 
-                  stroke={theme.colors.text.secondary}
-                  style={{ fontSize: theme.typography.bodySmall.fontSize, fontFamily: theme.typography.fontFamily }}
-                  tick={{ fill: theme.colors.text.secondary }}
-                />
-                <YAxis 
-                  stroke={theme.colors.text.secondary}
-                  style={{ fontSize: theme.typography.bodySmall.fontSize, fontFamily: theme.typography.fontFamily }}
-                  tick={{ fill: theme.colors.text.secondary }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: theme.colors.background.primary,
-                    borderColor: theme.colors.border.medium,
-                    color: theme.colors.text.primary,
-                    borderRadius: theme.shape.radius.default,
-                    fontSize: theme.typography.bodySmall.fontSize,
-                    fontFamily: theme.typography.fontFamily
-                  }}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="latency" 
-                  stroke={theme.visualization.getColorByName('red')} 
-                  strokeWidth={2.5}
-                  fill="url(#latencyGradient)"
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div style={{ 
-            padding: theme.spacing(2),
-            border: `1px solid ${theme.colors.border.weak}`,
-            borderRadius: theme.shape.radius.default,
-            background: theme.colors.background.secondary,
-          }}>
-            <h3 style={{ 
-              fontSize: theme.typography.h5.fontSize,
-              fontWeight: theme.typography.h5.fontWeight,
-              marginBottom: theme.spacing(2),
-              color: theme.colors.text.primary,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              fontFamily: theme.typography.fontFamily
-            }}>
-              Cost Trend
-            </h3>
-            <ResponsiveContainer width="100%" height={Math.min(280, height - 350)}>
-              <LineChart data={formatted}>
-                <defs>
-                  <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={theme.visualization.getColorByName('green')} stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor={theme.visualization.getColorByName('green')} stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke={theme.colors.border.weak} strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="time" 
-                  stroke={theme.colors.text.secondary}
-                  style={{ fontSize: theme.typography.bodySmall.fontSize, fontFamily: theme.typography.fontFamily }}
-                  tick={{ fill: theme.colors.text.secondary }}
-                />
-                <YAxis 
-                  stroke={theme.colors.text.secondary}
-                  style={{ fontSize: theme.typography.bodySmall.fontSize, fontFamily: theme.typography.fontFamily }}
-                  tick={{ fill: theme.colors.text.secondary }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: theme.colors.background.primary,
-                    borderColor: theme.colors.border.medium,
-                    color: theme.colors.text.primary,
-                    borderRadius: theme.shape.radius.default,
-                    fontSize: theme.typography.bodySmall.fontSize,
-                    fontFamily: theme.typography.fontFamily
-                  }}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="cost" 
-                  stroke={theme.visualization.getColorByName('green')} 
-                  strokeWidth={2.5}
-                  fill="url(#costGradient)"
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {height > 550 && (
-            <div style={{ 
-              padding: theme.spacing(2),
-              border: `1px solid ${theme.colors.border.weak}`,
-              borderRadius: theme.shape.radius.default,
-              background: theme.colors.background.secondary,
-              gridColumn: '1 / -1'
-            }}>
-              <h3 style={{ 
-                fontSize: theme.typography.h5.fontSize,
-                fontWeight: theme.typography.h5.fontWeight,
-                marginBottom: theme.spacing(2),
-                color: theme.colors.text.primary,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontFamily: theme.typography.fontFamily
-              }}>
-                Token Usage Distribution
-              </h3>
-              <ResponsiveContainer width="100%" height={Math.min(280, height - 500)}>
-                <BarChart data={formatted}>
-                  <CartesianGrid stroke={theme.colors.border.weak} strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="time" 
-                    stroke={theme.colors.text.secondary}
-                    style={{ fontSize: theme.typography.bodySmall.fontSize, fontFamily: theme.typography.fontFamily }}
-                    tick={{ fill: theme.colors.text.secondary }}
-                  />
-                  <YAxis 
-                    stroke={theme.colors.text.secondary}
-                    style={{ fontSize: theme.typography.bodySmall.fontSize, fontFamily: theme.typography.fontFamily }}
-                    tick={{ fill: theme.colors.text.secondary }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: theme.colors.background.primary,
-                      borderColor: theme.colors.border.medium,
-                      color: theme.colors.text.primary,
-                      borderRadius: theme.shape.radius.default,
-                      fontSize: theme.typography.bodySmall.fontSize,
-                      fontFamily: theme.typography.fontFamily
-                    }}
-                  />
-                  <Legend 
-                    wrapperStyle={{ 
-                      fontSize: theme.typography.bodySmall.fontSize,
-                      fontWeight: theme.typography.fontWeightMedium,
-                      fontFamily: theme.typography.fontFamily
-                    }}
-                  />
-                  <Bar 
-                    dataKey="promptTokens" 
-                    fill={theme.visualization.getColorByName('blue')} 
-                    radius={[4, 4, 0, 0]} 
-                  />
-                  <Bar 
-                    dataKey="completionTokens" 
-                    fill={theme.visualization.getColorByName('green')} 
-                    radius={[4, 4, 0, 0]} 
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-export const plugin = new PanelPlugin<LLMWatchOptions>(LLMWatchPanel).setPanelOptions((builder) => {
-  return builder
-    .addBooleanSwitch({
-      path: 'showSparklines',
-      name: 'Show sparklines',
-      description: 'Display mini trend charts in metric cards',
-      defaultValue: defaultOptions.showSparklines,
-    })
-    .addNumberInput({
-      path: 'latencyThresholdWarning',
-      name: 'Latency warning threshold (ms)',
-      description: 'Show warning color when latency exceeds this value',
-      defaultValue: defaultOptions.latencyThresholdWarning,
-    })
-    .addNumberInput({
-      path: 'latencyThresholdCritical',
-      name: 'Latency critical threshold (ms)',
-      description: 'Show critical color and alert when latency exceeds this value',
-      defaultValue: defaultOptions.latencyThresholdCritical,
-    })
-    .addNumberInput({
-      path: 'costThresholdWarning',
-      name: 'Cost warning threshold ($)',
-      description: 'Show warning color when cost exceeds this value',
-      defaultValue: defaultOptions.costThresholdWarning,
-      settings: {
-        step: 0.00001,
-      },
-    })
-    .addNumberInput({
-      path: 'costThresholdCritical',
-      name: 'Cost critical threshold ($)',
-      description: 'Show critical color and alert when cost exceeds this value',
-      defaultValue: defaultOptions.costThresholdCritical,
-      settings: {
-        step: 0.00001,
-      },
+    export const plugin = new PanelPlugin<LLMWatchOptions>(LLMWatchPanel).setPanelOptions((builder) => {
+      return builder
+        .addBooleanSwitch({ path: 'showSparklines', name: 'Show sparklines', description: 'Display mini trend charts in metric cards', defaultValue: defaultOptions.showSparklines })
+        .addNumberInput({ path: 'latencyThresholdWarning', name: 'Latency warning threshold (ms)', description: 'Show warning color when latency exceeds this value', defaultValue: defaultOptions.latencyThresholdWarning })
+        .addNumberInput({ path: 'latencyThresholdCritical', name: 'Latency critical threshold (ms)', description: 'Show critical color and alert when latency exceeds this value', defaultValue: defaultOptions.latencyThresholdCritical })
+        .addNumberInput({ path: 'costThresholdWarning', name: 'Cost warning threshold ($)', description: 'Show warning color when cost exceeds this value', defaultValue: defaultOptions.costThresholdWarning, settings: { step: 0.00001 } })
+        .addNumberInput({ path: 'costThresholdCritical', name: 'Cost critical threshold ($)', description: 'Show critical color and alert when cost exceeds this value', defaultValue: defaultOptions.costThresholdCritical, settings: { step: 0.00001 } });
     });
-});

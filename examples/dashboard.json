@@ -35,6 +35,33 @@
       "datasource": null,
       "targets": []
     }
+    ,
+    {
+      "type": "panel",
+      "title": "LLM Watch - Provider Comparison",
+      "gridPos": { "x": 0, "y": 6, "w": 24, "h": 10 },
+      "id": 3,
+      "pluginVersion": "1.0.0",
+      "options": {
+        "usePrometheus": true,
+        "promQuery": "avg_over_time(llm_request_duration_ms[1m])"
+      },
+      "datasource": "Prometheus",
+      "targets": []
+    },
+    {
+      "type": "panel",
+      "title": "AI Insights (Llama Summary)",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 6 },
+      "id": 4,
+      "pluginVersion": "1.0.0",
+      "options": {
+        "usePrometheus": false,
+        "promQuery": ""
+      },
+      "datasource": null,
+      "targets": []
+    }
   ],
   "schemaVersion": 36,
   "style": "dark",

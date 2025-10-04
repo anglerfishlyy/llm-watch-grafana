@@ -4,14 +4,14 @@
   "name": "LLM Watch Panel",
   "module": "src/module.tsx",
   "info": {
-  "description": "LLM Watch Panel: visualizes latency, token usage, cost, and errors from LLM requests. Supports demo JSON from the agent and Prometheus time-series queries.",
+  "description": "Visualize and monitor LLM metrics from the Agent",
     "author": {
       "name": "Anglerfishlyy"
     },
     "keywords": ["LLM", "Cerebras", "Prometheus", "AI Monitoring"],
     "version": "1.0.0",
     "screenshots": [
-      { "name": "Panel preview", "path": "img/screenshot.png" }
+      { "name": "Panel preview", "path": "img/screenshot.png", "caption": "LLM Watch panel showing latency, cost, and token usage (demo data)" }
     ]
   },
   "dependencies": {
