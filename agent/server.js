@@ -9,9 +9,8 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(cors({
-  origin: "http://localhost:3000"
-}));
+// allow all origins for demo/dev convenience (can be restricted later)
+app.use(cors());
 const PORT = process.env.PORT || 8080;
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
 const LLAMA_API_KEY = process.env.LLAMA_API_KEY; // placeholder for Meta
@@ -23,22 +22,27 @@ let metrics = [];
 
 // Utility to call Cerebras
 async function callCerebras(prompt) {
-  const response = await fetch(CEREBRAS_API_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${CEREBRAS_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "llama3.1-8b",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Cerebras API error ${response.status}: ${text}`);
+  try {
+    const response = await fetch(CEREBRAS_API_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${CEREBRAS_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "llama3.1-8b",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Cerebras API error ${response.status}: ${text}`);
+    }
+    return await response.json();
+  } catch (err) {
+    // rethrow to be handled by caller
+    throw err;
   }
-  return response.json();
 }
 
 async function callLlama(prompt) {
@@ -48,22 +52,26 @@ async function callLlama(prompt) {
       usage: null,
     };
   }
-  const response = await fetch(LLAMA_API_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${LLAMA_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "llama-3-8b-chat",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Llama API error ${response.status}: ${text}`);
+  try {
+    const response = await fetch(LLAMA_API_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${LLAMA_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "llama-3-8b-chat",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Llama API error ${response.status}: ${text}`);
+    }
+    return await response.json();
+  } catch (err) {
+    throw err;
   }
-  return response.json();
 }
 
 // Generate random demo metrics
@@ -86,7 +94,8 @@ function generateDemoMetrics() {
   };
 
   metrics.push(entry);
-  if (metrics.length > 100) metrics.shift();
+  // cap metrics for demo stability
+  if (metrics.length > 500) metrics.shift();
 }
 
 // Auto-generate demo metrics every 3s
@@ -124,9 +133,9 @@ app.post("/call", async (req, res) => {
     };
 
     metrics.push(entry);
-    if (metrics.length > 100) metrics.shift();
+    if (metrics.length > 500) metrics.shift();
 
-    res.json({ output: json.choices?.[0]?.message?.content, metrics: entry });
+    res.json({ ok: true, metrics: entry, output: json.choices?.[0]?.message?.content });
   } catch (err) {
     const latency = performance.now() - start;
     const entry = {
@@ -140,30 +149,26 @@ app.post("/call", async (req, res) => {
       error: err.message,
     };
     metrics.push(entry);
-    res.status(500).json({ error: err.message });
+    if (metrics.length > 500) metrics.shift();
+    res.status(500).json({ ok: false, metrics: entry, error: err.message });
   }
 });
 
 app.get("/metrics/latest", (req, res) => {
-  res.json(metrics.slice(-1)[0] || {});
+  res.json({ ok: true, metrics: metrics.slice(-1)[0] || null });
 });
 
 app.get("/metrics/all", (req, res) => {
-  res.json(metrics);
+  res.json({ ok: true, metrics });
 });
 
 app.get("/metrics/aggregates", (req, res) => {
   const last10 = metrics.slice(-10);
-  const avgLatency = last10.reduce((a, m) => a + m.latency, 0) / (last10.length || 1);
-  const avgCost = last10.reduce((a, m) => a + m.cost, 0) / (last10.length || 1);
-  const errorRate =
-    last10.filter((m) => m.error !== null).length / (last10.length || 1);
+  const avgLatency = last10.reduce((a, m) => a + (m.latency || 0), 0) / (last10.length || 1);
+  const avgCost = last10.reduce((a, m) => a + (m.cost || 0), 0) / (last10.length || 1);
+  const errorRate = last10.filter((m) => m.error !== null).length / (last10.length || 1);
 
-  res.json({
-    avgLatency,
-    avgCost,
-    errorRate,
-  });
+  res.json({ ok: true, aggregates: { avgLatency, avgCost, errorRate } });
 });
 
 app.listen(PORT, () => {
