@@ -1,0 +1,34 @@
+name: Validate Plugin
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies (plugin)
+        working-directory: ./plugin/anglerfishlyy-llmwatch-panel
+        run: npm ci
+
+      - name: Run Grafana plugin validation
+        working-directory: ./plugin/anglerfishlyy-llmwatch-panel
+        run: |
+          set -e
+          if npx --no-install @grafana/toolkit --version > /dev/null 2>&1; then
+            npx @grafana/toolkit plugin:validate --log-level=error
+          else
+            echo "@grafana/toolkit not available, trying @grafana/create-plugin validate"
+            npx @grafana/create-plugin validate --log-level=error
+          fi

@@ -11,7 +11,7 @@
     "keywords": ["LLM", "Cerebras", "Prometheus", "AI Monitoring"],
     "version": "1.0.0",
     "screenshots": [
-      { "name": "Panel preview", "path": "img/screenshot-placeholder.svg" }
+      { "name": "Panel preview", "path": "img/screenshot.png" }
     ]
   },
   "dependencies": {

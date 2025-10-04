@@ -554,6 +554,29 @@ Thank you for your interest in this project. We look forward to continuing devel
 
 Built with passion for the FutureStack GenAI Hackathon 2025
 Powered by Cerebras | Containerized with Docker | Visualized with Grafana
+ 
+## Demo
+
+Below is a demo screenshot of the LLM Watch panel running inside Grafana (local demo).
+
+![LLM Watch Panel Demo](plugin/anglerfishlyy-llmwatch-panel/src/img/screenshot.png)
+
+Import the included example dashboard to see the panel in action:
+
+1. In Grafana, go to Dashboards → Import
+2. Upload `examples/dashboard.json` from this repository or paste the JSON
+3. Open the dashboard and wait a few seconds for Prometheus to display scraped metrics
+
+Show me quickly
+
+Two-line quick start (build & run demo stack):
+
+```bash
+# build the plugin and run the demo stack
+cd plugin/anglerfishlyy-llmwatch-panel && npm install && npm run build && cd ../.. && docker compose up --build
+```
+
+Grafana: http://localhost:3000 (admin/admin). Dashboard UID: `llm-watch-demo`.
 
 ------------
 MIT License

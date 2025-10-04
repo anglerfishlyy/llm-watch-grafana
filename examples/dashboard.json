@@ -1,0 +1,49 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1627384951234,
+  "links": [],
+  "panels": [
+    {
+      "type": "panel",
+      "title": "LLM Watch - Latency (Prometheus)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "id": 1,
+      "pluginVersion": "1.0.0",
+      "options": {
+        "usePrometheus": true,
+        "promQuery": "avg_over_time(llm_request_latency_ms[1m])"
+      },
+      "datasource": "Prometheus",
+      "targets": []
+    },
+    {
+      "type": "panel",
+      "title": "LLM Watch - Tokens (Agent)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 6 },
+      "id": 2,
+      "pluginVersion": "1.0.0",
+      "options": {
+        "usePrometheus": false,
+        "promQuery": ""
+      },
+      "datasource": null,
+      "targets": []
+    }
+  ],
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": ["llm", "watch", "demo"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "LLM Watch Demo Dashboard",
+  "uid": "llm-watch-demo",
+  "version": 1
+}
