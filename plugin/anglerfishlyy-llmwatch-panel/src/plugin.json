@@ -16,7 +16,13 @@
     "links": [
       { "name": "GitHub", "url": "https://github.com/anglerfishlyy/llm-watch-grafana" }
     ],
-    "screenshots": [],
+    "screenshots": [
+      {
+        "name": "Panel preview",
+        "path": "img/screenshot-placeholder.svg",
+        "caption": "Placeholder panel screenshot — replace with real screenshots before publishing"
+      }
+    ],
     "version": "1.0.0",
     "updated": "2025-09-29"
   },

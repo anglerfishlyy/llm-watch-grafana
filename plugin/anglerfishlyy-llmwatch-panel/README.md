@@ -1,3 +1,52 @@
+# LLM Watch Panel
+
+LLM Watch is a Grafana panel plugin that visualizes real-time metrics from LLM requests. It supports fetching metrics directly from an agent endpoint (for demo modes) and querying Prometheus through Grafana's datasource API for production-grade observability.
+
+## What it does
+- Visualizes latency, token usage (prompt/completion/total), request cost and error rates.
+- Integrates with Prometheus to run PromQL queries and render multiple series with legends.
+
+## Quick start (local/demo)
+1. Build the plugin (run in `plugin/anglerfishlyy-llmwatch-panel`):
+
+```bash
+# from plugin folder
+npm install
+npm run build
+```
+
+2. Start the demo stack from the repository root:
+
+```bash
+docker compose up --build
+```
+
+Grafana will be available at http://localhost:3000 and Prometheus at http://localhost:9090.
+
+## Features
+- Prometheus query integration via Grafana datasource API
+- Live latency and token usage charts
+- Customizable PromQL query via panel options
+
+## Build & signing (CI-ready)
+Add the grafana toolkit CI build step and sign the plugin for Grafana Marketplace.
+
+Install and build:
+
+```bash
+# from plugin folder
+npm install
+npm run build
+npm run ci-build
+```
+
+Signing: use `npm run sign` (this will run `@grafana/sign-plugin`) — you will need Grafana plugin signing keys and credentials from Grafana Cloud or the Grafana maintainers.
+
+## Screenshot
+PLACEHOLDER: Add a screenshot of the panel here before publishing.
+
+## Notes
+- The included plugin.json is marked as `signature: "unsigned"` for local development. To publish, obtain signing keys and update your pipeline to sign the artifact.
 # Grafana panel plugin template
 
 This template is a starting point for building a panel plugin for Grafana.
