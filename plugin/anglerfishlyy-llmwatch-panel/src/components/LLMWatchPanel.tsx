@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { DataQueryRequest, DataQueryResponse } from '@grafana/data';
+import { getDataSourceSrv } from '@grafana/runtime';
+import { dateTime } from '@grafana/data';
 import { PanelProps, PanelPlugin } from "@grafana/data";
 import { useTheme2, Badge } from "@grafana/ui";
 import {
@@ -94,49 +97,55 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
     error: m.error ?? null,
   }));
 
-  // Prometheus series for rate(http_requests_total[5m])
+  // Prometheus series (via Grafana datasource) for rate queries
   const [promSeries, setPromSeries] = useState<{ timestamp: number; rate: number }[]>([]);
 
   useEffect(() => {
     let mounted = true;
 
-    const fetchProm = async () => {
-      const end = Math.floor(Date.now() / 1000);
-      const start = end - 5 * 60; // last 5 minutes
-      const step = 5;
-      const query = encodeURIComponent('rate(http_requests_total[5m])');
-      const urls = [
-        `http://prometheus:9090/api/v1/query_range?query=${query}&start=${start}&end=${end}&step=${step}`,
-        `http://localhost:9090/api/v1/query_range?query=${query}&start=${start}&end=${end}&step=${step}`,
-      ];
+    const fetchViaDatasource = async (expr: string) => {
+      try {
+        const ds = await getDataSourceSrv().get('Prometheus');
+        const now = dateTime();
+        const range = { from: now.clone().subtract(5, 'm'), to: now } as any;
 
-      for (const url of urls) {
-        try {
-          const resp = await fetch(url);
-          if (!resp.ok) continue;
-          const json = await resp.json();
-          if (json.status === 'success' && json.data && Array.isArray(json.data.result) && json.data.result.length > 0) {
-            const values = json.data.result[0].values as Array<[number|string, string]>;
-            const series = values.map((v) => ({ timestamp: Math.floor(Number(v[0]) * 1000), rate: Number(v[1]) }));
-            if (mounted) {
-              setPromSeries(series);
-            }
+        const query: DataQueryRequest = {
+          targets: [{ expr, refId: 'A' } as any],
+          range,
+        } as any;
+
+        const res = (await ds.query(query)) as DataQueryResponse;
+        // parse the first series values
+        const frame = res.data?.[0];
+        if (frame && frame.fields) {
+          // assume the second field contains values
+          const valuesField = frame.fields[1];
+          const times = frame.fields[0];
+          if (valuesField && times) {
+            const vals = valuesField.values.toArray();
+            const timesArr = times.values.toArray();
+            const series = vals.map((v: any, i: number) => ({ timestamp: Number(timesArr[i]), rate: Number(v) }));
+            if (mounted) setPromSeries(series);
             return;
           }
-        } catch (err) {
-          // try next url
         }
+        if (mounted) setPromSeries([]);
+      } catch (err) {
+        if (mounted) setPromSeries([]);
       }
-  if (mounted) setPromSeries([]);
     };
 
-    fetchProm();
-    const iv = setInterval(fetchProm, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(iv);
-    };
-  }, []);
+    if (options && (options as any).usePrometheus) {
+      const expr = (options as any).promQuery || 'rate(http_requests_total[5m])';
+      fetchViaDatasource(expr);
+      const iv = setInterval(() => fetchViaDatasource(expr), 5000);
+      return () => {
+        mounted = false;
+        clearInterval(iv);
+      };
+    }
+    return () => { mounted = false; };
+  }, [options]);
 
   if (!metrics || metrics.length === 0) {
     return (
