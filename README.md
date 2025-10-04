@@ -1,404 +1,150 @@
-# llm-watch-grafana - Real-time LLM Observability Platform for Grafana
+# LLM Watch — Grafana panel for LLM observability
 
-Here's a comprehensive, professional README without emojis or symbols:
-markdown# LLM Watch - Real-time LLM Observability Platform for Grafana
+This repository contains LLM Watch, a Grafana panel plugin and a small agent service that together provide real-time observability for LLM requests. It was developed during the FutureStack hackathon to demonstrate practical monitoring for model latency, token usage, cost, and errors.
 
-**Track:** Cerebras - Best use of Cerebras API  
-**Hackathon:** FutureStack GenAI Hackathon 2024
+The implementation in this repo is a working prototype intended for demos and local evaluation. It wires a Node.js agent (collector + demo generator) to a Grafana panel plugin that can also query Prometheus via Grafana's datasource API.
 
-## Table of Contents
+## What this project actually does
+- `agent/` — lightweight Node.js service that accepts LLM call requests, proxies to a provider (Cerebras by default), and collects metrics. It exposes:
+  - `POST /call` — proxy/invoke an LLM provider and record metrics
+  - `GET /metrics/all` — JSON array of recent metrics (used by the panel)
+  - `GET /metrics/latest` — the most recent metric
+  - `GET /metrics/aggregates` — simple aggregates over the last N samples
+  - `GET /metrics` — Prometheus text exposition for scraping
 
-- [Overview](#overview)
-- [Problem Statement](#problem-statement)
-- [Solution](#solution)
-- [Architecture](#architecture)
-- [Technology Stack](#technology-stack)
-- [Getting Started](#getting-started)
-- [Usage](#usage)
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Development](#development)
-- [Demo](#demo)
-- [Future Enhancements](#future-enhancements)
-- [Acknowledgments](#acknowledgments)
-- [License](#license)
+- `plugin/anglerfishlyy-llmwatch-panel/` — Grafana panel plugin (React + TypeScript) that:
+  - Renders metric cards (latency, cost, tokens) and charts
+  - Can fetch demo JSON metrics from the agent for local demos
+  - Can query Prometheus through Grafana's datasource API to render multi-series charts
 
-## Overview
+This README focuses on what is present in the codebase, how to run it locally, and how to prepare the plugin for submission.
 
-LLM Watch is a comprehensive observability platform that provides real-time monitoring and visualization of Large Language Model operations. Built as a Grafana panel plugin, it leverages the Cerebras API for lightning-fast inference while tracking critical metrics like latency, token usage, costs, and error rates. The platform enables organizations to gain complete visibility into their LLM infrastructure, optimize costs, and maintain service quality.
+## Problem addressed
+Monitoring LLM workloads requires tracking a set of domain-specific signals (latency, token counts, cost, and model errors) that aren't captured by generic infrastructure metrics. Teams need an easy way to visualize these signals alongside existing observability stacks (Prometheus + Grafana). LLM Watch fills that gap by presenting LLM-specific telemetry in a compact Grafana panel and by bridging a simple agent and Prometheus scraping for integration testing.
 
-## Problem Statement
+## Solution (what's implemented)
+- A small Node.js agent that proxies LLM requests and records telemetry in-memory.
+- A Grafana panel plugin that displays recent LLM metrics, aggregates, and time-series charts.
+- Optional integration with Prometheus: the agent exposes a `/metrics` endpoint that Prometheus can scrape; the panel can query Prometheus via Grafana's datasource API and render multiple series with legends.
 
-Organizations deploying Large Language Models in production face several critical challenges:
+The repo ships a ready-to-run Compose stack (Grafana + Prometheus + agent) for demos.
 
-**Lack of Visibility**: Teams have no real-time insight into how their LLM infrastructure is performing. When latency increases or costs spike, they discover it too late, often after user complaints or at the end of the billing cycle.
+## Architecture and file layout (concise)
 
-**Cost Management**: LLM API costs can escalate rapidly with token-based pricing. Without granular tracking of prompt tokens, completion tokens, and per-request costs, organizations struggle to budget and optimize their spending.
+Top-level layout (relevant folders):
 
-**Performance Monitoring**: Production LLM systems need consistent performance. Teams need to monitor response latency, detect quality drift, and identify error patterns before they impact end users.
+- `agent/` — Node.js agent service
+  - `server.js` — express server, endpoints described above
+  - `tokenUtils.js` — simple token estimator used by the agent
+  - `Dockerfile`, `.env.example`, `package.json`
 
-**Integration Complexity**: Existing monitoring tools are not designed for LLM-specific metrics. Teams need purpose-built solutions that understand token economics, model-specific characteristics, and inference patterns.
+- `plugin/anglerfishlyy-llmwatch-panel/` — Grafana panel plugin
+  - `src/` — TypeScript source
+    - `components/LLMWatchPanel.tsx` — main panel UI and data handling
+    - `components/QueryEditor.tsx` — small placeholder for query editor
+    - `module.tsx` — plugin registration and option schema
+    - `plugin.json` — plugin metadata used by Grafana (bundled)
+  - `package.json` — build scripts (`build`, `ci-build`, `sign`), dev deps
+  - `README.md` — plugin-specific documentation (keeps guidance shorter)
 
-## Solution
+- `grafana/provisioning/` — provisioning files to auto-add Prometheus datasource
+- `prometheus/prometheus.yml` — scrape config (scrapes the agent)
+- `docker-compose.yml` and `docker-compose.override.yml` — local demo orchestration
 
-LLM Watch addresses these challenges through a purpose-built Grafana plugin that provides:
+## Data flow (runtime)
+1. The agent receives a `POST /call` request, forwards to the configured LLM provider, measures latency, and parses usage (prompt/completion tokens) when available.
+2. The agent stores metrics in a capped in-memory array and exposes them via JSON endpoints and a Prometheus exposition endpoint for scraping.
+3. Grafana loads the plugin from `plugin/.../dist` (local mounting). The panel either: (a) fetches JSON from the agent for quick demos, or (b) uses Grafana's datasource API to query Prometheus and render time-series charts.
 
-**Real-time Metrics Collection**: Every LLM request flowing through the system is instrumented, capturing latency, token counts, costs, and errors. The agent backend processes requests through the Cerebras API while simultaneously collecting detailed telemetry.
+## Cerebras API usage
+- The agent contains a Cerebras client path by default (the code calls `api.cerebras.ai` endpoints if `CEREBRAS_API_KEY` is set). The agent extracts usage tokens from the provider response when present.
+- The code is structured so that provider calls are encapsulated: you can swap or add providers (for example, a LLaMA-based service) by implementing the same call interface and returning the same usage shape (prompt_tokens/completion_tokens/total_tokens).
 
-**Visual Dashboard**: A custom Grafana panel plugin displays metrics in an intuitive, actionable format. Users see current values with sparklines showing trends, aggregate statistics over rolling windows, and detailed charts for historical analysis.
+Security note: an API key may be present in `agent/.env` for local testing. Do not commit production keys.
 
-**Cost Tracking**: Automatic calculation of request costs based on token usage and provider pricing. Teams can track spending in real-time and identify cost optimization opportunities.
+## Docker / local demo
+The repo includes Compose configuration to launch the demo stack: agent, Grafana, and Prometheus.
 
-**Alert System**: Configurable thresholds for latency and cost trigger visual alerts, enabling proactive response to performance degradation or budget overruns.
+Quick run (demo):
 
-**Docker Deployment**: Complete containerization ensures consistent deployment across development and production environments. The entire stack starts with a single docker-compose command.
-
-## Architecture
-
-### High-Level Architecture
-┌─────────────────────────────────────────────────────────────────────┐
-│                         LLM Watch Platform                          │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────┐                                                  │
-│  │   Client     │                                                  │
-│  │ Application  │                                                  │
-│  └──────┬───────┘                                                  │
-│         │                                                           │
-│         │ HTTP POST /api/llm/call                                  │
-│         │ { prompt: "...", model: "..." }                          │
-│         │                                                           │
-│         ▼                                                           │
-│  ┌──────────────────────────────────────────┐                     │
-│  │         Agent Backend (Node.js)          │                     │
-│  │  ┌────────────────────────────────────┐  │                     │
-│  │  │   Request Handler                  │  │                     │
-│  │  │   - Validates input                │  │                     │
-│  │  │   - Starts timer                   │  │                     │
-│  │  └────────────┬───────────────────────┘  │                     │
-│  │               │                            │                     │
-│  │               ▼                            │                     │
-│  │  ┌────────────────────────────────────┐  │                     │
-│  │  │   Cerebras API Client              │  │                     │
-│  │  │   - Formats request                │  │                     │
-│  │  │   - Adds authentication            │  │                     │
-│  │  │   - Sends to Cerebras              │  │                     │
-│  │  └────────────┬───────────────────────┘  │                     │
-│  │               │                            │                     │
-│  └───────────────┼────────────────────────────┘                     │
-│                  │                                                   │
-│                  │ HTTPS                                             │
-│                  │                                                   │
-│                  ▼                                                   │
-│  ┌──────────────────────────────────────────┐                     │
-│  │      Cerebras Inference API              │                     │
-│  │   (World's Fastest AI Chip)              │                     │
-│  │   - Processes prompt                     │                     │
-│  │   - Returns completion                   │                     │
-│  │   - Provides usage metrics               │                     │
-│  └──────────────┬───────────────────────────┘                     │
-│                  │                                                   │
-│                  │ Response + Usage Data                             │
-│                  │ { choices: [...], usage: {...} }                  │
-│                  │                                                   │
-│                  ▼                                                   │
-│  ┌──────────────────────────────────────────┐                     │
-│  │         Agent Backend (Cont'd)           │                     │
-│  │  ┌────────────────────────────────────┐  │                     │
-│  │  │   Metrics Processor                │  │                     │
-│  │  │   - Calculates latency             │  │                     │
-│  │  │   - Extracts token counts          │  │                     │
-│  │  │   - Computes cost                  │  │                     │
-│  │  │   - Detects errors                 │  │                     │
-│  │  └────────────┬───────────────────────┘  │                     │
-│  │               │                            │                     │
-│  │               ▼                            │                     │
-│  │  ┌────────────────────────────────────┐  │                     │
-│  │  │   In-Memory Metrics Store          │  │                     │
-│  │  │   - Stores last 100 metrics        │  │                     │
-│  │  │   - Provides query endpoints       │  │                     │
-│  │  │   - Calculates aggregates          │  │                     │
-│  │  └────────────┬───────────────────────┘  │                     │
-│  └───────────────┼────────────────────────────┘                     │
-│                  │                                                   │
-│                  │ HTTP GET /api/metrics/all                         │
-│                  │ HTTP GET /api/metrics/aggregates                  │
-│                  │                                                   │
-│                  ▼                                                   │
-│  ┌──────────────────────────────────────────┐                     │
-│  │     Grafana with LLM Watch Plugin        │                     │
-│  │  ┌────────────────────────────────────┐  │                     │
-│  │  │   Panel Plugin (React)             │  │                     │
-│  │  │   - Fetches metrics via HTTP       │  │                     │
-│  │  │   - Parses data frames             │  │                     │
-│  │  │   - Renders visualizations         │  │                     │
-│  │  └────────────┬───────────────────────┘  │                     │
-│  │               │                            │                     │
-│  │               ▼                            │                     │
-│  │  ┌────────────────────────────────────┐  │                     │
-│  │  │   Visualization Layer              │  │                     │
-│  │  │   - Metric cards with sparklines   │  │                     │
-│  │  │   - Aggregate statistics           │  │                     │
-│  │  │   - Time-series charts             │  │                     │
-│  │  │   - Alert indicators               │  │                     │
-│  │  └────────────────────────────────────┘  │                     │
-│  └──────────────────────────────────────────┘                     │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-### Data Flow Architecture
-Request Lifecycle:
-
-Client Request
-└─> POST /api/llm/call
-└─> { prompt: "Explain quantum computing", model: "llama3.1-8b" }
-Agent Processing
-└─> Start timestamp = Date.now()
-└─> Format Cerebras API request
-└─> Add authentication header
-└─> Send to api.cerebras.ai/v1/chat/completions
-Cerebras Inference
-└─> Process on world's fastest AI chip
-└─> Generate completion
-└─> Return response with usage data
-└─> {
-choices: [{ message: { content: "..." } }],
-usage: {
-prompt_tokens: 12,
-completion_tokens: 156,
-total_tokens: 168
-}
-}
-Metrics Collection
-└─> End timestamp = Date.now()
-└─> Calculate latency = end - start
-└─> Extract prompt_tokens, completion_tokens
-└─> Calculate cost = (total_tokens / 1M) * price_per_1M
-└─> Create metric object:
-{
-timestamp: 1696234567890,
-latency: 127,
-promptTokens: 12,
-completionTokens: 156,
-totalTokens: 168,
-cost: 0.0000168,
-error: null,
-model: "llama3.1-8b"
-}
-└─> Store in metrics array
-Metrics Storage
-└─> Append to in-memory array
-└─> Maintain rolling window (last 100 requests)
-└─> Calculate aggregates on demand
-Grafana Visualization
-└─> Panel queries: GET /api/metrics/all
-└─> Parse response into data frames
-└─> Render real-time dashboard
-└─> Update every 3 seconds (Grafana refresh)
-
-
-### Component Interaction Diagram
-┌─────────────────────────────────────────────────────────────────┐
-│                      Docker Network: llm-watch                   │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────────────┐                                       │
-│  │   Agent Container    │                                       │
-│  │   (node:18-alpine)   │                                       │
-│  │  Port: 8080          │                                       │
-│  │  ┌────────────────┐  │                                       │
-│  │  │ Express Server │  │                                       │
-│  │  │ - CORS enabled │  │                                       │
-│  │  │ - JSON parsing │  │                                       │
-│  │  └────────────────┘  │                                       │
-│  │  Environment:         │                                       │
-│  │  - CEREBRAS_API_KEY  │                                       │
-│  │  - PORT=8080         │                                       │
-│  └──────────┬───────────┘                                       │
-│             │                                                     │
-│             │ Internal network communication                      │
-│             │ http://agent:8080                                  │
-│             │                                                     │
-│             ▼                                                     │
-│  ┌──────────────────────┐                                       │
-│  │ Grafana Container    │                                       │
-│  │ (grafana/grafana)    │                                       │
-│  │  Port: 3000          │                                       │
-│  │  ┌────────────────┐  │                                       │
-│  │  │ Plugin System  │  │                                       │
-│  │  │ - Loads plugin │  │                                       │
-│  │  │ - Renders UI   │  │                                       │
-│  │  └────────────────┘  │                                       │
-│  │  Volumes:             │                                       │
-│  │  - ./dist mounted    │                                       │
-│  │  - provisioning      │                                       │
-│  └──────────────────────┘                                       │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-External Network:
-│
-│ Port 3000 → Grafana Web UI
-│ Port 8080 → Agent API (optional external access)
-│
-▼
-User Browser
-
-### Plugin Architecture
-Grafana Panel Plugin Structure:
-plugin/anglerfishlyy-llmwatch-panel
- ├─src/
-    ├── components/
-    │   └── LLMWatchPanel.tsx
-    │       │
-    │       ├─> Panel Entry Point
-    │       │   └─> Receives PanelProps from Grafana
-    │       │       └─> { options, data, width, height }
-    │       │
-    │       ├─> Data Processing Layer
-    │       │   └─> Parses DataFrame from data source
-    │       │   └─> Extracts fields: timestamp, latency, tokens, cost, error
-    │       │   └─> Calculates aggregates: avg latency, avg cost, error rate
-    │       │
-    │       ├─> Visualization Components
-    │       │   ├─> MetricCard
-    │       │   │   └─> Displays single metric with sparkline
-    │       │   │   └─> Shows trend indicator
-    │       │   │   └─> Renders alert badge if threshold exceeded
-    │       │   │
-    │       │   ├─> Aggregate Stats Cards
-    │       │   │   └─> Rolling window calculations (last 10 requests)
-    │       │   │   └─> Average latency, cost, error rate
-    │       │   │
-    │       │   └─> Charts
-    │       │       ├─> Latency Trend (Area Chart)
-    │       │       ├─> Cost Trend (Area Chart)
-    │       │       └─> Token Distribution (Bar Chart)
-    │       │
-    │       └─> Theme Integration
-    │           └─> Uses Grafana theme system
-    │           └─> Responsive to light/dark mode
-    │           └─> Follows typography guidelines
-    │
-    ├── module.ts
-    │   └─> Plugin registration
-    │   └─> Exports PanelPlugin instance
-    │   └─> Defines panel options schema
-    │
-    └── plugin.json
-        └─> Plugin metadata
-        └─> Type: panel
-        └─> Dependencies and version info
-
-## Technology Stack
-
-### Core Technologies
-
-**Cerebras API**: The backbone of our inference layer. Cerebras provides the world's fastest AI chip, enabling sub-100ms latency for LLM requests. The API returns detailed usage metrics including prompt tokens, completion tokens, and total tokens, which we use for cost calculation and performance analysis.
-
-**Grafana**: Industry-standard observability platform. We chose Grafana because it is the de facto tool for monitoring production systems, has an extensive plugin ecosystem, and provides a robust framework for building custom visualizations.
-
-**Docker**: Containerization ensures consistent deployment across environments. Docker Compose orchestrates the multi-container architecture, handling networking, volumes, and environment variables seamlessly.
-
-### Backend Stack
-
-**Node.js 18**: Modern JavaScript runtime with excellent async performance for handling concurrent API requests and metrics processing.
-
-**Express.js**: Lightweight web framework for building the RESTful API that serves as the bridge between client applications and the Cerebras API.
-
-**CORS Middleware**: Enables cross-origin requests from Grafana, which runs on a different port in development and potentially different domain in production.
-
-### Frontend Stack
-
-**React 18**: Powers the Grafana panel plugin UI. We use functional components with hooks for state management and side effects.
-
-**Recharts**: Declarative charting library for React. Chosen for its flexibility, responsive design, and compatibility with Grafana's theme system.
-
-**Grafana UI Library**: Official component library providing theme-aware UI components like Cards, Badges, and Typography that match Grafana's design language.
-
-**Lucide React**: Modern icon library providing crisp, customizable icons for metrics visualization.
-
-### Development Tools
-
-**TypeScript**: Static typing ensures code quality and provides excellent developer experience with IntelliJ sense and compile-time error checking.
-
-**Grafana Plugin Tools**: Official scaffolding and build tools from Grafana Labs. We used create-plugin to initialize the project structure following Grafana's best practices.
-
-**Webpack**: Module bundler configured by Grafana plugin tools to build the production bundle compatible with Grafana's plugin system.
-
-## Getting Started
-
-### Prerequisites
-
-Before you begin, ensure you have the following installed:
-
-- Node.js version 18 or higher
-- npm version 8 or higher
-- Docker Desktop version 20 or higher
-- Git for version control
-- A Cerebras API key (sign up at cerebras.ai)
-
-### Installation
-
-**Step 1: Clone the repository**
 ```bash
-git clone https://github.com/anglerfishlyy/llm-watch-grafana.git
-cd llm-watch-grafana
+# from the repository root
+docker compose up --build
 ```
-Step 2: Install plugin dependencies
-```cd plugin && npm install```
-Step 3: Install agent dependencies
-```bash 
-cd agent 
+
+Behavior:
+- Grafana: http://localhost:3000 (default credentials: admin / admin)
+- Prometheus: http://localhost:9090
+- Agent API: http://localhost:8080
+
+Notes:
+- The `docker-compose.override.yml` mounts `plugin/anglerfishlyy-llmwatch-panel/dist` into Grafana's plugins directory. Build the plugin first so `dist/` exists (see next section).
+
+## Building the plugin & CI prep
+1. Build (local development):
+
+```bash
+cd plugin/anglerfishlyy-llmwatch-panel
 npm install
-cd ..
+npm run build        # produces dist/
 ```
 
-Step 4: Configure environment variables
-Create a .env file in the agent directory:
+2. CI-ready build (produces a signed artifact if signing is configured):
 
-```bash 
-cd agent
-cp .env.example .env
-```
-
-Edit the .env file and add your Cerebras API key:
-```bash 
-CEREBRAS_API_KEY=your_cerebras_api_key_here
-PORT=8080
-```
-Step 5: Build the plugin
 ```bash
-npm run build
+# requires grafana-toolkit available in the environment
+npm run ci-build
 ```
-This compiles the TypeScript code and bundles the plugin using Webpack. The output is placed in the dist/ directory, which Docker will mount into the Grafana container.
-Running with Docker
-Start the entire stack:
+
+3. Signing (optional for publishing):
+
 ```bash
-docker-compose up 
+npm run sign
 ```
-This command:
 
-Builds the agent container from the Node.js Alpine image
-Pulls the latest Grafana image
-Creates a Docker network for inter-container communication
-Starts both containers with appropriate port mappings
-Mounts the plugin dist folder into Grafana
+The plugin `package.json` in `plugin/anglerfishlyy-llmwatch-panel` already includes `ci-build` and `sign` scripts. To publish on Grafana.com you will need a signing key / process and to follow Grafana's plugin submission workflow.
 
-Access the application:
+## Getting started (developer)
 
-Grafana UI: http://localhost:3000
-Agent API: http://localhost:8080
-Default Grafana credentials: admin / admin
+1. Build the plugin (see previous section).
+2. Start services with Docker Compose from repo root:
 
-First-time setup in Grafana:
+```bash
+docker compose up --build
+```
 
-Log in with admin/admin
-Navigate to Dashboards → New Dashboard
-Add a new panel
-Select "LLM Watch Panel" from the visualization dropdown
-Configure panel options if needed
-Save the dashboard
+3. In Grafana:
+  - Log in (admin/admin)
+  - Add a new dashboard and create a panel
+  - Select "LLM Watch Panel" as the visualization
+  - If using Prometheus, enable the `Use Prometheus` panel option and edit the `PromQL Query`
 
+## Development notes
+- Plugin dev environment: run `npm run dev` inside `plugin/anglerfishlyy-llmwatch-panel` to build in watch mode (webpack). Ensure `dist/` is present for Grafana to load the plugin (the dev server writes to memory; copy to `dist/` if needed for Docker mounting).
+- Agent dev: inside `agent/` run `npm ci` then `npm run dev` (nodemon). Agent uses ESM (`type: "module"` in package.json).
+- Tests: plugin has Jest + Playwright config for unit and e2e tests. Run `npm run test` inside the plugin folder for unit tests.
+
+## Known limitations (be transparent)
+- This is a demo/prototype. Metrics are stored in-memory (capped) — not suitable for production long-term storage.
+- The Prometheus integration expects a local Prometheus scrape of the agent (`/metrics`). For production, point Prometheus at a stable metrics exporter or persist metrics centrally.
+- The QueryEditor is a placeholder. A full Grafana query editor integration should be implemented to provide autocomplete and datasource helpers.
+
+## Future work
+- Persist metrics to a time-series store (Prometheus remote write / Cortex / Thanos) for long-term analysis.
+- Add datasource selection in panel options (don't assume a `Prometheus` datasource name).
+- Implement a proper QueryEditor using Grafana's UI helpers and query builder.
+- Add RBAC and hardened security for agent endpoints.
+
+## FutureStack hackathon context
+This project was produced for the FutureStack hackathon to demonstrate how a small bridge (agent) plus a Grafana panel can give immediate visibility into model behaviour for teams adopting LLMs. The implementation focuses on a minimal, demonstrable path from inference to observability.
+
+## License
+MIT — see `LICENSE` in the repository.
+
+---
+If you'd like, I can now:
+- Add a brief CONTRIBUTING.md with build/test steps and a checklist for Grafana submission.
+- Run a validation step (`npx grafana-toolkit plugin:validate`) locally and report any plugin.json schema warnings (requires grafana-toolkit in the environment).
 Running for Development
 If you prefer to run services individually for development:
 Terminal 1: Start the agent
