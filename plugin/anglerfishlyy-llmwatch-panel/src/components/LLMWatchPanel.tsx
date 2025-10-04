@@ -3,6 +3,7 @@ import { PanelProps, PanelPlugin } from "@grafana/data";
 import { useTheme2, Badge } from "@grafana/ui";
 import {
   LineChart,
+  Line,
   CartesianGrid,
   XAxis,
   YAxis,
@@ -93,6 +94,50 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
     error: m.error ?? null,
   }));
 
+  // Prometheus series for rate(http_requests_total[5m])
+  const [promSeries, setPromSeries] = useState<{ timestamp: number; rate: number }[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchProm = async () => {
+      const end = Math.floor(Date.now() / 1000);
+      const start = end - 5 * 60; // last 5 minutes
+      const step = 5;
+      const query = encodeURIComponent('rate(http_requests_total[5m])');
+      const urls = [
+        `http://prometheus:9090/api/v1/query_range?query=${query}&start=${start}&end=${end}&step=${step}`,
+        `http://localhost:9090/api/v1/query_range?query=${query}&start=${start}&end=${end}&step=${step}`,
+      ];
+
+      for (const url of urls) {
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) continue;
+          const json = await resp.json();
+          if (json.status === 'success' && json.data && Array.isArray(json.data.result) && json.data.result.length > 0) {
+            const values = json.data.result[0].values as Array<[number|string, string]>;
+            const series = values.map((v) => ({ timestamp: Math.floor(Number(v[0]) * 1000), rate: Number(v[1]) }));
+            if (mounted) {
+              setPromSeries(series);
+            }
+            return;
+          }
+        } catch (err) {
+          // try next url
+        }
+      }
+  if (mounted) setPromSeries([]);
+    };
+
+    fetchProm();
+    const iv = setInterval(fetchProm, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(iv);
+    };
+  }, []);
+
   if (!metrics || metrics.length === 0) {
     return (
       <div 
@@ -134,6 +179,11 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
   const formatted = metrics.map((m) => ({
     ...m,
     time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+  }));
+
+  const formattedProm = promSeries.map((p) => ({
+    time: new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    rate: p.rate,
   }));
 
   // Calculate aggregates from last 10 records
@@ -490,9 +540,40 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
               letterSpacing: '0.5px',
               fontFamily: theme.typography.fontFamily
             }}>
+              Prometheus: http_requests_total rate (5m)
+            </h3>
+            <ResponsiveContainer width="100%" height={Math.min(140, Math.floor((height - 350) / 2))}>
+              <LineChart data={formattedProm}>
+                <CartesianGrid stroke={theme.colors.border.weak} strokeDasharray="3 3" />
+                <XAxis dataKey="time" stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
+                <YAxis stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: theme.colors.background.primary,
+                    borderColor: theme.colors.border.medium,
+                    color: theme.colors.text.primary,
+                    borderRadius: theme.shape.radius.default,
+                    fontSize: theme.typography.bodySmall.fontSize,
+                    fontFamily: theme.typography.fontFamily
+                  }}
+                />
+                <Line type="monotone" dataKey="rate" stroke={theme.visualization.getColorByName('blue')} dot={false} isAnimationActive={false} strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+
+            <h3 style={{ 
+              fontSize: theme.typography.h5.fontSize,
+              fontWeight: theme.typography.h5.fontWeight,
+              marginTop: theme.spacing(2),
+              marginBottom: theme.spacing(2),
+              color: theme.colors.text.primary,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              fontFamily: theme.typography.fontFamily
+            }}>
               Latency Trend
             </h3>
-            <ResponsiveContainer width="100%" height={Math.min(280, height - 350)}>
+            <ResponsiveContainer width="100%" height={Math.min(140, Math.floor((height - 350) / 2))}>
               <LineChart data={formatted}>
                 <defs>
                   <linearGradient id="latencyGradient" x1="0" y1="0" x2="0" y2="1">
