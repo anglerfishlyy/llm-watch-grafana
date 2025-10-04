@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { PanelProps, PanelPlugin } from "@grafana/data";
 import { useTheme2, Badge } from "@grafana/ui";
 import {
@@ -40,10 +40,60 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
 }) => {
   const theme = useTheme2();
 
-  // Extract data from Grafana data frames
-  const series = data.series;
-  
-  if (!series || series.length === 0) {
+  // Fetch live metrics from the agent backend (inside Docker use service name 'agent')
+  const [metricsState, setMetricsState] = useState<any[]>([]);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchMetrics = async () => {
+      const endpoints = [
+        'http://agent:8080/metrics/all',
+        'http://localhost:8080/metrics/all',
+      ];
+
+      for (const url of endpoints) {
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) continue;
+          const json = await resp.json();
+          const arr = json.metrics || [];
+          if (Array.isArray(arr)) {
+            if (mounted) {
+              setMetricsState(arr);
+              setFetchError(null);
+            }
+            return;
+          }
+        } catch (err) {
+          // try the next endpoint
+        }
+      }
+      if (mounted) setFetchError('Error fetching metrics');
+    };
+
+    fetchMetrics();
+    const iv = setInterval(fetchMetrics, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(iv);
+    };
+  }, []);
+
+  // normalize fetched metrics to expected shape
+  const metrics: any[] = (metricsState || []).map((m: any) => ({
+    timestamp: m.timestamp ?? m.time ?? Date.now(),
+    provider: m.provider ?? 'unknown',
+    latency: Number(m.latency ?? 0),
+    promptTokens: Number(m.promptTokens ?? m.prompt_tokens ?? 0),
+    completionTokens: Number(m.completionTokens ?? m.completion_tokens ?? 0),
+    totalTokens: Number(m.totalTokens ?? m.total_tokens ?? m.total ?? 0),
+    cost: Number(m.cost ?? 0),
+    error: m.error ?? null,
+  }));
+
+  if (!metrics || metrics.length === 0) {
     return (
       <div 
         style={{ 
@@ -53,63 +103,12 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
           alignItems: 'center',
           justifyContent: 'center',
           background: 'transparent',
+          color: theme.colors.text.secondary,
         }}
       >
-        <div style={{ textAlign: 'center' }}>
-          <Activity 
-            size={64} 
-            style={{ 
-              margin: '0 auto 16px',
-              color: theme.colors.text.secondary,
-              animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
-            }}
-          />
-          <div style={{ 
-            color: theme.colors.text.secondary, 
-            fontSize: theme.typography.h5.fontSize,
-            fontFamily: theme.typography.fontFamily,
-            marginBottom: theme.spacing(1)
-          }}>
-            No data
-          </div>
-          <div style={{ 
-            color: theme.colors.text.disabled, 
-            fontSize: theme.typography.bodySmall.fontSize,
-            fontFamily: theme.typography.fontFamily
-          }}>
-            Configure a data source in the Query tab
-          </div>
-        </div>
+        <div style={{ textAlign: 'center' }}>{fetchError ? 'Error fetching metrics' : 'No data yet'}</div>
       </div>
     );
-  }
-
-  // Parse metrics from data frames
-  // Expected fields: timestamp, latency, promptTokens, completionTokens, totalTokens, cost, error
-  const metrics: any[] = [];
-  const frame = series[0];
-  const length = frame.length;
-
-  // Find field indices
-  const timestampField = frame.fields.find(f => f.name === 'timestamp' || f.name === 'time' || f.name === 'Time');
-  const latencyField = frame.fields.find(f => f.name === 'latency');
-  const promptTokensField = frame.fields.find(f => f.name === 'promptTokens' || f.name === 'prompt_tokens');
-  const completionTokensField = frame.fields.find(f => f.name === 'completionTokens' || f.name === 'completion_tokens');
-  const totalTokensField = frame.fields.find(f => f.name === 'totalTokens' || f.name === 'total_tokens');
-  const costField = frame.fields.find(f => f.name === 'cost');
-  const errorField = frame.fields.find(f => f.name === 'error');
-
-  // Build metrics array
-  for (let i = 0; i < length; i++) {
-    metrics.push({
-      timestamp: timestampField?.values[i] || Date.now(),
-      latency: latencyField?.values[i] || 0,
-      promptTokens: promptTokensField?.values[i] || 0,
-      completionTokens: completionTokensField?.values[i] || 0,
-      totalTokens: totalTokensField?.values[i] || 0,
-      cost: costField?.values[i] || 0,
-      error: errorField?.values[i] || null,
-    });
   }
 
   if (metrics.length === 0) {
