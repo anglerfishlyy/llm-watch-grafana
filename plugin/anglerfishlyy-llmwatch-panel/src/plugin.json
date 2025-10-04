@@ -5,7 +5,7 @@
   "id": "anglerfishlyy-llmwatch-panel",
   "info": {
     "keywords": ["panel", "llm", "metrics", "cerebras", "grafana"],
-    "description": "A Grafana panel to monitor latency, tokens, costs, and errors from LLM API calls (Cerebras, Llama, etc).",
+  "description": "LLM Watch Panel: visualizes latency, token usage, cost, and errors from LLM requests. Supports demo JSON from the agent and Prometheus time-series queries.",
     "author": {
       "name": "Anglerfishlyy"
     },

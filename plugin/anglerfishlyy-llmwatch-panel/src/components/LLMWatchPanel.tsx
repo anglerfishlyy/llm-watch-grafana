@@ -44,44 +44,49 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
 }) => {
   const theme = useTheme2();
 
+  // Choose agent host dynamically: use localhost when developing locally, otherwise use the service name
+  const AGENT_URL =
+    (typeof window !== 'undefined' && window.location && window.location.hostname === 'localhost')
+      ? 'http://localhost:8080/metrics/all'
+      : 'http://agent:8080/metrics/all';
+
   // Fetch live metrics from the agent backend (inside Docker use service name 'agent')
   const [metricsState, setMetricsState] = useState<any[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  // Track which data source was last used to populate the UI
+  const [lastDataSource, setLastDataSource] = useState<'agent' | 'prometheus' | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
     const fetchMetrics = async () => {
-      const endpoints = [
-        'http://agent:8080/metrics/all',
-        'http://localhost:8080/metrics/all',
-      ];
-
-      for (const url of endpoints) {
-        try {
-          const resp = await fetch(url);
-          if (!resp.ok) continue;
-          const json = await resp.json();
-          const arr = json.metrics || [];
-          if (Array.isArray(arr)) {
-            if (mounted) {
-              setMetricsState(arr);
-              setFetchError(null);
-              try {
-                // Debug log so Grafana console shows agent path usage
-                // eslint-disable-next-line no-console
-                console.log('LLMWatchPanel: fetched metrics from agent endpoint', url, 'count=', arr.length);
-              } catch (e) {
-                // ignore logging errors in panel runtime
-              }
-            }
-            return;
-          }
-        } catch (err) {
-          // try the next endpoint
+      try {
+        const resp = await fetch(AGENT_URL);
+        if (!resp.ok) {
+          if (mounted) setFetchError(`Agent responded with status ${resp.status}`);
+          return;
         }
+        const json = await resp.json();
+        const arr = json.metrics || [];
+        if (Array.isArray(arr)) {
+            if (mounted) {
+            setMetricsState(arr);
+            setFetchError(null);
+            setLastDataSource('agent');
+            try {
+              // Debug log so Grafana console shows agent path usage
+              // eslint-disable-next-line no-console
+              console.log('LLMWatchPanel: fetched metrics from agent endpoint', AGENT_URL, 'count=', arr.length);
+            } catch (e) {
+              // ignore logging errors in panel runtime
+            }
+          }
+        } else {
+          if (mounted) setFetchError('Invalid metrics payload');
+        }
+      } catch (err) {
+        if (mounted) setFetchError('Error fetching metrics');
       }
-      if (mounted) setFetchError('Error fetching metrics');
     };
 
     fetchMetrics();
@@ -164,6 +169,7 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
 
         if (mounted) {
           setPromSeries(series);
+          setLastDataSource('prometheus');
           try {
             // Debug log so Grafana console shows Prometheus path usage
             // eslint-disable-next-line no-console
@@ -428,6 +434,14 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
       overflowX: 'auto',
       fontFamily: theme.typography.fontFamily
     }}>
+      {/* Data source badge + Primary Metrics */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: theme.spacing(1) }}>
+        {lastDataSource && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing(1) }}>
+            <Badge text={`data: ${lastDataSource}`} color={lastDataSource === 'agent' ? 'blue' : 'purple'} />
+          </div>
+        )}
+      </div>
       {/* Primary Metrics */}
       <div style={{
         display: 'grid',

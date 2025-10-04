@@ -4,7 +4,7 @@
   "name": "LLM Watch Panel",
   "module": "src/module.tsx",
   "info": {
-    "description": "LLM Watch Panel - monitor latency, token usage, costs and errors from LLM requests. Integrates with Prometheus for time-series queries.",
+  "description": "LLM Watch Panel: visualizes latency, token usage, cost, and errors from LLM requests. Supports demo JSON from the agent and Prometheus time-series queries.",
     "author": {
       "name": "Anglerfishlyy"
     },
