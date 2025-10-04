@@ -104,6 +104,7 @@ setInterval(generateDemoMetrics, 3000);
 // Existing call endpoint
 app.post("/call", async (req, res) => {
   const { provider = "cerebras", prompt } = req.body;
+  console.log(`Agent: /call invoked (provider=${provider})`);
   const start = performance.now();
 
   try {
@@ -155,10 +156,12 @@ app.post("/call", async (req, res) => {
 });
 
 app.get("/metrics/latest", (req, res) => {
+  console.log('Agent: /metrics/latest requested');
   res.json({ ok: true, metrics: metrics.slice(-1)[0] || null });
 });
 
 app.get("/metrics/all", (req, res) => {
+  console.log('Agent: /metrics/all requested');
   res.json({ ok: true, metrics });
 });
 
@@ -173,6 +176,7 @@ app.get("/metrics/aggregates", (req, res) => {
 
 // Prometheus scrape endpoint (simple text exposition)
 app.get('/metrics', (req, res) => {
+  console.log('Agent: /metrics (Prometheus scrape) requested');
   // basic metrics: http_requests_total and demo_latency_ms (gauge)
   const totalRequests = metrics.length;
   const latestLatency = metrics.slice(-1)[0]?.latency ?? 0;

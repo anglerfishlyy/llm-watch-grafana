@@ -67,6 +67,13 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
             if (mounted) {
               setMetricsState(arr);
               setFetchError(null);
+              try {
+                // Debug log so Grafana console shows agent path usage
+                // eslint-disable-next-line no-console
+                console.log('LLMWatchPanel: fetched metrics from agent endpoint', url, 'count=', arr.length);
+              } catch (e) {
+                // ignore logging errors in panel runtime
+              }
             }
             return;
           }
@@ -155,7 +162,14 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
           }
         }
 
-        if (mounted) setPromSeries(series);
+        if (mounted) {
+          setPromSeries(series);
+          try {
+            // Debug log so Grafana console shows Prometheus path usage
+            // eslint-disable-next-line no-console
+            console.log('LLMWatchPanel: fetched metrics from Prometheus datasource, expr=', expr, 'seriesCount=', series.length);
+          } catch (e) {}
+        }
       } catch (err: any) {
         if (mounted) {
           setPromError(err && err.message ? String(err.message) : 'Error querying datasource');

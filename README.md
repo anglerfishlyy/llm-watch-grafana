@@ -579,6 +579,29 @@ cd plugin/anglerfishlyy-llmwatch-panel && npm install && npm run build && cd ../
 Grafana: http://localhost:3000 (admin/admin). Dashboard UID: `llm-watch-demo`.
 
 ------------
+
+Debugging data source selection
+--------------------------------
+
+To confirm whether the panel is showing data from Prometheus (scraped) or directly from the agent JSON endpoint:
+
+- Panel (browser console): Open the browser DevTools console for Grafana. The panel logs a message when it fetches data:
+  - "LLMWatchPanel: fetched metrics from agent endpoint <url> count=..." — indicates agent JSON path was used
+  - "LLMWatchPanel: fetched metrics from Prometheus datasource, expr=... seriesCount=..." — indicates Prometheus datasource path was used
+
+- Agent (server logs): Tail the agent container logs or terminal where the agent is running. The agent logs show:
+  - "Agent: /metrics/all requested" — a JSON fetch from the agent endpoint
+  - "Agent: /metrics (Prometheus scrape) requested" — a Prometheus scrape hit
+
+Example (docker compose):
+
+```bash
+# show Grafana browser console logs for the panel while viewing the dashboard (open DevTools)
+# show agent logs
+docker compose logs -f agent
+```
+
+These logs let you confirm live whether the Grafana panel is relying on Prometheus or pulling demo JSON directly from the agent.
 MIT License
 
 Copyright (c) 2025 [kavya samudrala]
