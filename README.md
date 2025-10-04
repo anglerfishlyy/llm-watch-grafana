@@ -51,10 +51,125 @@ Top-level layout (relevant folders):
 - `prometheus/prometheus.yml` — scrape config (scrapes the agent)
 - `docker-compose.yml` and `docker-compose.override.yml` — local demo orchestration
 
+### System Architecture
+```mermaid
+graph LR
+  Browser[User Browser]
+  Grafana[Grafana Server]
+  Plugin[LLM Watch Panel Plugin]
+  Prometheus[Prometheus]
+  Agent[Agent Backend]
+  Cerebras[Cerebras API / LLaMA endpoint]
+
+  Browser -->|HTTP UI| Grafana
+  Grafana -->|loads plugin| Plugin
+  Plugin -->|queries| Prometheus
+  Prometheus -->|scrape /metrics| Agent
+  Plugin -->|fetch (demo)| Agent
+  Agent -->|LLM request| Cerebras
+  Cerebras -->|completion + usage| Agent
+  Agent -->|exposes metrics| Prometheus
+  Prometheus -->|time-series data| Plugin
+```
+
+Caption: System-level components and primary request/response arrows (UI, plugin, agent, Prometheus, and model endpoints).
+
+### Folder & file structure (overview)
+```mermaid
+classDiagram
+  class repo {
+    +agent/
+    +plugin/anglerfishlyy-llmwatch-panel/
+    +grafana/provisioning/
+    +prometheus/
+    +docker-compose.yml
+    +README.md
+  }
+
+  class agent {
+    +server.js
+    +tokenUtils.js
+    +Dockerfile
+    +package.json
+  }
+
+  class plugin {
+    +src/
+    +plugin.json
+    +package.json
+    +README.md
+  }
+
+  class provisioning {
+    +datasources/datasource.yml
+  }
+
+  repo <|-- agent
+  repo <|-- plugin
+  repo <|-- provisioning
+  repo <|-- prometheus
+```
+
+Caption: High-level repository layout — the panel plugin and agent are the primary development focus.
+
+### Plugin architecture (component interactions)
+```mermaid
+flowchart TB
+  subgraph GrafanaCore[Grafana Core]
+    direction TB
+    UI[Grafana UI]
+    Runtime[Runtime Services]
+  end
+
+  subgraph PluginFrontend[LLM Watch Panel]
+    PF[Panel React UI]
+    Options[Panel Options]
+  end
+
+  subgraph DataSources[Data & Backend]
+    Prom[Prometheus]
+    AgentSvc[Agent Backend]
+  end
+
+  UI --> PF
+  PF -->|datasource API| Runtime
+  Runtime -->|query| Prom
+  Prom -->|scrape| AgentSvc
+  PF -->|demo fetch| AgentSvc
+  PF -->|render| UI
+```
+
+Caption: How the Grafana runtime, panel frontend, Prometheus, and agent interact at runtime.
+
 ## Data flow (runtime)
 1. The agent receives a `POST /call` request, forwards to the configured LLM provider, measures latency, and parses usage (prompt/completion tokens) when available.
 2. The agent stores metrics in a capped in-memory array and exposes them via JSON endpoints and a Prometheus exposition endpoint for scraping.
 3. Grafana loads the plugin from `plugin/.../dist` (local mounting). The panel either: (a) fetches JSON from the agent for quick demos, or (b) uses Grafana's datasource API to query Prometheus and render time-series charts.
+
+### Data flow sequence
+```mermaid
+sequenceDiagram
+  participant User as User (Browser)
+  participant Grafana as Grafana UI
+  participant Plugin as LLM Watch Panel
+  participant Prom as Prometheus
+  participant Agent as Agent Backend
+  participant Model as Cerebras / LLaMA
+
+  User->>Grafana: open dashboard / interact with panel
+  Grafana->>Plugin: render panel (load options)
+  Plugin->>Prom: query (via Grafana datasource) or
+  Plugin->>Agent: fetch demo JSON
+  Prom->>Agent: scrape /metrics
+  Agent->>Model: POST inference request (if new call)
+  Model-->>Agent: response + usage
+  Agent-->>Prom: expose metrics
+  Prom-->>Plugin: time-series response
+  Plugin-->>Grafana: render charts
+  Grafana-->>User: updated UI
+```
+
+Caption: Sequence showing the typical path from user action through Prometheus/agent to model and back to Grafana visualization.
 
 ## Cerebras API usage
 - The agent contains a Cerebras client path by default (the code calls `api.cerebras.ai` endpoints if `CEREBRAS_API_KEY` is set). The agent extracts usage tokens from the provider response when present.
