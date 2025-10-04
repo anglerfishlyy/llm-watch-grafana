@@ -98,40 +98,71 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
   }));
 
   // Prometheus series (via Grafana datasource) for rate queries
-  const [promSeries, setPromSeries] = useState<{ timestamp: number; rate: number }[]>([]);
+  const [promSeries, setPromSeries] = useState<Array<{ name: string; points: { timestamp: number; value: number }[] }>>([]);
+  const [promLoading, setPromLoading] = useState(false);
+  const [promError, setPromError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
     const fetchViaDatasource = async (expr: string) => {
+      setPromError(null);
+      setPromLoading(true);
       try {
         const ds = await getDataSourceSrv().get('Prometheus');
-        const now = dateTime();
-        const range = { from: now.clone().subtract(5, 'm'), to: now } as any;
+        const now = Date.now();
 
-        const query: DataQueryRequest = {
-          targets: [{ expr, refId: 'A' } as any],
-          range,
+        const req: DataQueryRequest = {
+          range: { from: dateTime(new Date(now - 5 * 60 * 1000).toISOString()), to: dateTime(new Date(now).toISOString()) },
+          targets: [{ refId: 'A', expr } as any],
         } as any;
 
-        const res = (await ds.query(query)) as DataQueryResponse;
-        // parse the first series values
-        const frame = res.data?.[0];
-        if (frame && frame.fields) {
-          // assume the second field contains values
-          const valuesField = frame.fields[1];
-          const times = frame.fields[0];
-          if (valuesField && times) {
-            const vals = valuesField.values.toArray();
-            const timesArr = times.values.toArray();
-            const series = vals.map((v: any, i: number) => ({ timestamp: Number(timesArr[i]), rate: Number(v) }));
-            if (mounted) setPromSeries(series);
-            return;
+        const res = (await ds.query(req)) as DataQueryResponse;
+
+        const series: Array<{ name: string; points: { timestamp: number; value: number }[] }> = [];
+
+        if (res && Array.isArray(res.data)) {
+          for (const frame of res.data as any[]) {
+            const fields = frame.fields || [];
+            const timeFieldIndex = fields.findIndex((f: any) => f.type === 'time' || f.name === 'time');
+            const valueFieldIndex = fields.findIndex((f: any) => f.type === 'number' || f.type === 'float' || f.type === 'double' || f.type === 'int');
+
+            if (timeFieldIndex === -1 || valueFieldIndex === -1) {
+              continue;
+            }
+
+            const timeField = fields[timeFieldIndex];
+            const valueField = fields[valueFieldIndex];
+
+            const timeVals = timeField.values && (timeField.values.toArray ? timeField.values.toArray() : timeField.values);
+            const valVals = valueField.values && (valueField.values.toArray ? valueField.values.toArray() : valueField.values);
+
+            if (!Array.isArray(timeVals) || !Array.isArray(valVals)) continue;
+
+            const pts: { timestamp: number; value: number }[] = [];
+            const len = Math.min(timeVals.length, valVals.length);
+            for (let i = 0; i < len; i++) {
+              const t = new Date(timeVals[i]).getTime();
+              const v = Number(valVals[i]);
+              if (!Number.isFinite(v) || Number.isNaN(t)) continue;
+              pts.push({ timestamp: t, value: v });
+            }
+
+            if (pts.length === 0) continue;
+
+            const name = frame.name || (valueField.labels ? Object.entries(valueField.labels).map(([k, v]) => `${k}=${v}`).join(',') : `series_${series.length}`);
+            series.push({ name, points: pts });
           }
         }
-        if (mounted) setPromSeries([]);
-      } catch (err) {
-        if (mounted) setPromSeries([]);
+
+        if (mounted) setPromSeries(series);
+      } catch (err: any) {
+        if (mounted) {
+          setPromError(err && err.message ? String(err.message) : 'Error querying datasource');
+          setPromSeries([]);
+        }
+      } finally {
+        if (mounted) setPromLoading(false);
       }
     };
 
@@ -190,10 +221,7 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
     time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
   }));
 
-  const formattedProm = promSeries.map((p) => ({
-    time: new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    rate: p.rate,
-  }));
+  // promSeries is used directly in charts below
 
   // Calculate aggregates from last 10 records
   const last10 = metrics.slice(-10);
@@ -551,24 +579,56 @@ export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({
             }}>
               Prometheus: http_requests_total rate (5m)
             </h3>
-            <ResponsiveContainer width="100%" height={Math.min(140, Math.floor((height - 350) / 2))}>
-              <LineChart data={formattedProm}>
-                <CartesianGrid stroke={theme.colors.border.weak} strokeDasharray="3 3" />
-                <XAxis dataKey="time" stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
-                <YAxis stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: theme.colors.background.primary,
-                    borderColor: theme.colors.border.medium,
-                    color: theme.colors.text.primary,
-                    borderRadius: theme.shape.radius.default,
-                    fontSize: theme.typography.bodySmall.fontSize,
-                    fontFamily: theme.typography.fontFamily
-                  }}
-                />
-                <Line type="monotone" dataKey="rate" stroke={theme.visualization.getColorByName('blue')} dot={false} isAnimationActive={false} strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
+            <div style={{ minHeight: 140, display: 'flex', alignItems: 'center' }}>
+              {promLoading ? (
+                <div style={{ width: '100%', textAlign: 'center', color: theme.colors.text.secondary }}>Loading Prometheus data…</div>
+              ) : promError ? (
+                <div style={{ width: '100%', textAlign: 'center', color: theme.visualization.getColorByName('red') }}>{`Error: ${promError}`}</div>
+              ) : promSeries.length === 0 ? (
+                <div style={{ width: '100%', textAlign: 'center', color: theme.colors.text.secondary }}>No series found</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={Math.min(240, Math.floor((height - 350) / 2))}>
+                  {(() => {
+                    // build combined rows keyed by timestamp
+                    const timestamps = new Set<number>();
+                    for (const s of promSeries) for (const p of s.points) timestamps.add(p.timestamp);
+                    const sorted = Array.from(timestamps).sort((a, b) => a - b);
+                    const rows = sorted.map((ts) => {
+                      const r: any = { time: new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) };
+                      for (const s of promSeries) {
+                        const pt = s.points.find((x) => x.timestamp === ts);
+                        r[s.name] = pt ? pt.value : null;
+                      }
+                      return r;
+                    });
+
+                    const strokes = ['#8884d8', '#82ca9d', '#ff7300', '#413ea0', '#ff0000', '#00aaff'];
+
+                    return (
+                      <LineChart data={rows}>
+                        <CartesianGrid stroke={theme.colors.border.weak} strokeDasharray="3 3" />
+                        <XAxis dataKey="time" stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
+                        <YAxis stroke={theme.colors.text.secondary} tick={{ fill: theme.colors.text.secondary }} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: theme.colors.background.primary,
+                            borderColor: theme.colors.border.medium,
+                            color: theme.colors.text.primary,
+                            borderRadius: theme.shape.radius.default,
+                            fontSize: theme.typography.bodySmall.fontSize,
+                            fontFamily: theme.typography.fontFamily
+                          }}
+                        />
+                        <Legend />
+                        {promSeries.map((s, idx) => (
+                          <Line key={s.name} type="monotone" dataKey={s.name} stroke={strokes[idx % strokes.length]} dot={false} isAnimationActive={false} strokeWidth={2} />
+                        ))}
+                      </LineChart>
+                    );
+                  })()}
+                </ResponsiveContainer>
+              )}
+            </div>
 
             <h3 style={{ 
               fontSize: theme.typography.h5.fontSize,

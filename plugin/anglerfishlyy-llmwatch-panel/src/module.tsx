@@ -12,7 +12,10 @@ export const plugin = new PanelPlugin(LLMWatchPanel)
 			.addTextInput({
 				path: 'promQuery',
 				name: 'PromQL Query',
-				description: 'Prometheus query to run (when Use Prometheus is enabled)',
+				description: 'Prometheus query to run when Use Prometheus is enabled. You can use PromQL expressions and functions. Use a newline to separate complex queries or comments.',
 				defaultValue: 'rate(http_requests_total[5m])',
+				settings: {
+					rows: 4,
+				},
 			});
 	});
