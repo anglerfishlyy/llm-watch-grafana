@@ -171,6 +171,25 @@ app.get("/metrics/aggregates", (req, res) => {
   res.json({ ok: true, aggregates: { avgLatency, avgCost, errorRate } });
 });
 
+// Prometheus scrape endpoint (simple text exposition)
+app.get('/metrics', (req, res) => {
+  // basic metrics: http_requests_total and demo_latency_ms (gauge)
+  const totalRequests = metrics.length;
+  const latestLatency = metrics.slice(-1)[0]?.latency ?? 0;
+
+  const lines = [];
+  lines.push('# HELP http_requests_total Total number of HTTP requests processed (demo)');
+  lines.push('# TYPE http_requests_total counter');
+  lines.push(`http_requests_total ${totalRequests}`);
+
+  lines.push('# HELP demo_latency_ms Latest latency observed in ms');
+  lines.push('# TYPE demo_latency_ms gauge');
+  lines.push(`demo_latency_ms ${latestLatency}`);
+
+  res.set('Content-Type', 'text/plain; version=0.0.4');
+  res.send(lines.join('\n'));
+});
+
 app.listen(PORT, () => {
   console.log(`Agent running on http://localhost:${PORT}`);
 });

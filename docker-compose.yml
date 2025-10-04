@@ -31,6 +31,19 @@ services:
       - agent
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: llm-watch-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - llm-watch
+    depends_on:
+      - agent
+    restart: unless-stopped
+
 networks:
   llm-watch:
     driver: bridge
