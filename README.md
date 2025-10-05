@@ -15,6 +15,9 @@ Built for the **FutureStack GenAI Hackathon**, this project showcases practical 
 
 ### Main Panel View
 ![LLM Watch Panel](plugin/anglerfishlyy-llmwatch-panel/src/img/screenshot.png)
+<img width="1888" height="911" alt="{5392D89C-D37F-45A3-84E9-F5204284F18D}" src="https://github.com/user-attachments/assets/5cd4ceef-86ab-498b-a544-9cc8afafb0bc" />
+<img width="1920" height="852" alt="{4CE410A2-6180-42FB-B9EE-22FA1CA3CF3D}" src="https://github.com/user-attachments/assets/8e17e41a-a536-457c-87e6-27e8d82666fc" />
+
 
 **Features Shown:**
 - Real-time latency, cost, and token metrics
@@ -25,7 +28,7 @@ Built for the **FutureStack GenAI Hackathon**, this project showcases practical 
 
 ---
 
-## 🎯 Problem Statement
+## Problem Statement
 
 Modern AI applications face critical observability challenges:
 
@@ -37,11 +40,11 @@ Modern AI applications face critical observability challenges:
 
 ---
 
-## ✨ Our Solution
+## The Solution
 
 LLM Watch provides a **complete observability stack** for AI workloads:
 
-### 🎨 **Grafana Panel Plugin** (Frontend)
+###  **Grafana Panel Plugin** (Frontend)
 - Beautiful, responsive UI built with React + TypeScript
 - Real-time metric visualization with Recharts
 - Interactive provider selection dropdown
@@ -49,14 +52,14 @@ LLM Watch provides a **complete observability stack** for AI workloads:
 - Token usage distribution charts
 - Automatic metric refresh (5s intervals)
 
-### ⚡ **Intelligent Agent Backend** (Node.js)
+###  **Intelligent Agent Backend** (Node.js)
 - Multi-provider LLM proxy with automatic metric collection
 - RESTful API for metric queries and LLM calls
 - Prometheus metrics exposition
 - In-memory metric storage with aggregation
 - Demo metric generation for testing
 
-### 🐳 **Docker Stack**
+###  **Docker Stack**
 - Complete orchestration with docker-compose
 - Grafana + Prometheus + Agent + MCP Gateway
 - Auto-provisioned datasources
@@ -64,7 +67,7 @@ LLM Watch provides a **complete observability stack** for AI workloads:
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
 ### System Overview
 
@@ -134,7 +137,7 @@ LLM Watch provides a **complete observability stack** for AI workloads:
 
 ---
 
-## 🛠️ Technologies Used
+##  Technologies Used
 
 ### Frontend (Grafana Plugin)
 | Technology | Purpose | Version |
@@ -413,7 +416,7 @@ curl -X POST http://localhost:8080/call \
 
 ---
 
-## 💻 Usage Guide
+##  Usage Guide
 
 ### Panel Features
 
@@ -575,7 +578,7 @@ Find more at: https://openrouter.ai/models
 
 ---
 
-## 🧪 Testing
+##  Testing
 
 ### Automated Test Script
 
@@ -625,7 +628,7 @@ curl -X POST http://localhost:8080/call \
 
 ---
 
-## 🐛 Troubleshooting
+##  Troubleshooting
 
 ### Common Issues
 
@@ -707,7 +710,7 @@ curl http://localhost:8080/metrics/all
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 llm-watch-grafana/
@@ -881,7 +884,7 @@ docker run -d -p 3000:3000 \
 ### Future Enhancements 🔮
 - [ ] Historical trend analysis
 - [ ] Cost alerting thresholds
-- [ ] Multi-dashboard support
+- [ ] Alerting when any value is high
 - [ ] Custom metric aggregations
 - [ ] A/B testing between providers
 - [ ] Latency percentile tracking (p50, p95, p99)
@@ -928,11 +931,11 @@ Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
 ---
 
-## 📞 Contact & Links
+##  Contact & Links
 
 - **GitHub**: https://github.com/anglerfishlyy/llm-watch-grafana
 - **Author**: Anglerfishlyy
-- **Hackathon**: FutureStack GenAI Hackathon 2024
+- **Hackathon**: FutureStack GenAI Hackathon 2025
 
 ---
 
