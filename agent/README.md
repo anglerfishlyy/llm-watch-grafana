@@ -1,14 +1,22 @@
-# Agent (llm-watch-grafana/agent)
+# LLM Watch Agent
 
-Quick agent to call Llama-like APIs and record simple metrics.
+The agent is a modular Node.js service that proxies LLM requests to multiple providers and collects comprehensive metrics for observability.
 
-## Setup
-1. copy .env.example to .env and fill values (LLAMA_ENDPOINT, LLAMA_API_KEY).
-2. npm install
-3. npm run dev
+## Architecture
 
-## Endpoints
-POST /call   => { prompt: "text" }  (triggers model call)
-GET  /metrics/latest => returns last series entries
-
-NOTE: .env must not be committed.
+```
+agent/
+├── config/
+│   └── index.js          # Centralized configuration management
+├── providers/
+│   ├── index.js          # Provider registry and unified interface
+│   ├── cerebras.js       # Cerebras API adapter
+│   ├── openrouter.js     # OpenRouter API adapter
+│   ├── llama.js          # Llama API adapter
+│   └── mcpGateway.js     # MCP Gateway adapter
+├── utils/
+│   ├── errors.js         # Standardized error handling
+│   └── metrics.js        # Metrics storage and management
+├── server.js             # Main server entry point
+├── mcp_gateway.js        # MCP Gateway service
+└── tokenUtils.js         # Token estimation utility

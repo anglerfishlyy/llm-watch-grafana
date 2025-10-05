@@ -1,174 +1,225 @@
-import express from "express";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-import { performance } from "perf_hooks";
-import { calculateTokens } from "./tokenUtils.js";
-import { callProvider } from './providers/index.js';
-import cors from "cors";
+/**
+ * @fileoverview LLM Watch Agent - Main server entry point
+ * @module server
+ */
 
-dotenv.config();
+import express from "express";
+import cors from "cors";
+import { performance } from "perf_hooks";
+import { config, validateConfig } from './config/index.js';
+import { callProvider, getAvailableProviders } from './providers/index.js';
+import { metricsStore, createMetricEntry, generateDemoMetric } from './utils/metrics.js';
+import { LLMWatchError } from './utils/errors.js';
+
+// Validate configuration on startup
+validateConfig();
 
 const app = express();
+
+// Middleware
 app.use(express.json());
-// allow all origins for demo/dev convenience (can be restricted later)
-app.use(cors());
-const PORT = process.env.PORT || 8080;
-const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
-const LLAMA_API_KEY = process.env.LLAMA_API_KEY; // placeholder for Meta
-const CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions";
-const LLAMA_API_URL = "https://api.llama.meta/v1/chat/completions";
-
-// in-memory store
-let metrics = [];
-
-// Prometheus counters/gauges stored in-memory for exposition
-let prometheusCounters = {
-  requests_total: 0,
-};
-
-// Provider adapters are implemented in /providers and called via callProvider
-
-// Generate random demo metrics
-function generateDemoMetrics() {
-  const latency = 50 + Math.random() * 200; // 50-250ms
-  const promptTokens = Math.floor(Math.random() * 100);
-  const completionTokens = Math.floor(Math.random() * 150);
-  const totalTokens = promptTokens + completionTokens;
-  const cost = totalTokens * 0.000001;
-
-  const entry = {
-    timestamp: Date.now(),
-    provider: "demo",
-    latency,
-    promptTokens,
-    completionTokens,
-    totalTokens,
-    cost,
-    error: null,
-  };
-
-  metrics.push(entry);
-  // cap metrics for demo stability
-  if (metrics.length > 500) metrics.shift();
+if (config.server.corsEnabled) {
+  app.use(cors());
 }
 
-// Auto-generate demo metrics every 3s
-setInterval(generateDemoMetrics, 3000);
+/**
+ * Health check endpoint
+ */
+app.get('/health', (req, res) => {
+  res.json({ 
+    ok: true, 
+    status: 'healthy',
+    providers: getAvailableProviders(),
+    timestamp: Date.now(),
+  });
+});
 
-// Existing call endpoint
+/**
+ * Auto-generate demo metrics for testing
+ */
+if (config.metrics.demoGenerationInterval > 0) {
+  setInterval(() => {
+    const demoMetric = generateDemoMetric();
+    metricsStore.add(demoMetric);
+  }, config.metrics.demoGenerationInterval);
+  console.log(`Demo metrics generation enabled (interval: ${config.metrics.demoGenerationInterval}ms)`);
+}
+
+/**
+ * Main LLM call endpoint
+ * Proxies requests to configured providers and records metrics
+ */
 app.post('/call', async (req, res) => {
   const { provider = 'cerebras', prompt = '', model } = req.body || {};
-  console.log(`Agent: /call invoked (provider=${provider}, model=${model || 'default'})`);
+  console.log(`[${new Date().toISOString()}] POST /call - provider=${provider}, model=${model || 'default'}`);
 
   const start = performance.now();
+  
   try {
     const result = await callProvider({ provider, prompt, model });
-
     const latencyMs = result.latencyMs ?? performance.now() - start;
-    const usage = result.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-    const entry = {
-      timestamp: Date.now(),
-      provider: result.provider || provider,
-      model: result.model || model || 'unknown',
-      latency: latencyMs,
-      promptTokens: usage.prompt_tokens ?? usage.promptTokens ?? 0,
-      completionTokens: usage.completion_tokens ?? usage.completionTokens ?? 0,
-      totalTokens: usage.total_tokens ?? usage.totalTokens ?? 0,
-      cost: result.cost ?? 0,
-      error: result.error ?? null,
-    };
+    
+    // Create and store metric entry
+    const entry = createMetricEntry(result, provider, model, latencyMs);
+    metricsStore.add(entry);
 
-    // push metrics and maintain cap
-    metrics.push(entry);
-    if (metrics.length > 500) metrics.shift();
-
-    // update prometheus counters
-    prometheusCounters.requests_total += 1;
-
-    res.json({ ok: result.ok !== false, metrics: entry, output: result.response });
+    // Return response
+    res.json({ 
+      ok: result.ok !== false, 
+      metrics: entry, 
+      output: result.response,
+      provider: result.provider,
+      model: result.model,
+    });
   } catch (err) {
     const latencyMs = performance.now() - start;
-    const entry = {
+    
+    // Handle errors gracefully
+    const errorEntry = {
       timestamp: Date.now(),
       provider,
-      model: model || null,
+      model: model || 'unknown',
       latency: latencyMs,
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
       cost: 0,
-      error: err && err.message ? String(err.message) : 'unknown_error',
+      error: err instanceof LLMWatchError ? err.message : String(err.message || err),
     };
 
-    metrics.push(entry);
-    if (metrics.length > 500) metrics.shift();
-    prometheusCounters.requests_total += 1;
+    metricsStore.add(errorEntry);
 
-    res.status(500).json({ ok: false, metrics: entry, error: entry.error });
+    const statusCode = err instanceof LLMWatchError ? err.statusCode : 500;
+    res.status(statusCode).json({ 
+      ok: false, 
+      metrics: errorEntry, 
+      error: errorEntry.error,
+      errorCode: err.code || 'UNKNOWN_ERROR',
+    });
   }
 });
 
+/**
+ * Get latest metric
+ */
 app.get("/metrics/latest", (req, res) => {
-  console.log('Agent: /metrics/latest requested');
-  res.json({ ok: true, metrics: metrics.slice(-1)[0] || null });
+  console.log('[' + new Date().toISOString() + '] GET /metrics/latest');
+  const latest = metricsStore.getLatest();
+  res.json({ ok: true, metrics: latest });
 });
 
+/**
+ * Get all metrics
+ */
 app.get("/metrics/all", (req, res) => {
-  console.log('Agent: /metrics/all requested');
-  res.json({ ok: true, metrics });
+  console.log('[' + new Date().toISOString() + '] GET /metrics/all');
+  const allMetrics = metricsStore.getAll();
+  res.json({ ok: true, metrics: allMetrics, count: allMetrics.length });
 });
 
+/**
+ * Get aggregate statistics
+ */
 app.get("/metrics/aggregates", (req, res) => {
-  const last10 = metrics.slice(-10);
-  const avgLatency = last10.reduce((a, m) => a + (m.latency || 0), 0) / (last10.length || 1);
-  const avgCost = last10.reduce((a, m) => a + (m.cost || 0), 0) / (last10.length || 1);
-  const errorRate = last10.filter((m) => m.error !== null).length / (last10.length || 1);
-
-  res.json({ ok: true, aggregates: { avgLatency, avgCost, errorRate } });
+  const count = parseInt(req.query.count || '10', 10);
+  const aggregates = metricsStore.getAggregates(count);
+  res.json({ ok: true, aggregates, sampleSize: count });
 });
 
-// Prometheus scrape endpoint (simple text exposition)
+/**
+ * Prometheus metrics exposition endpoint
+ * Exposes metrics in Prometheus text format for scraping
+ */
 app.get('/metrics', (req, res) => {
-  console.log('Agent: /metrics (Prometheus scrape) requested');
-  // Expose counters and gauges labeled by provider and model for LLM observability
-  // Build lines for Prometheus text exposition format
+  if (!config.prometheus.enabled) {
+    return res.status(404).json({ error: 'Prometheus metrics disabled' });
+  }
+
+  console.log('[' + new Date().toISOString() + '] GET /metrics (Prometheus scrape)');
+  
   const lines = [];
+  const counters = metricsStore.getPrometheusCounters();
+  const groups = metricsStore.getGroupedMetrics();
+
+  // Total requests counter
   lines.push('# HELP llm_requests_total Total number of LLM requests processed');
   lines.push('# TYPE llm_requests_total counter');
+  lines.push(`llm_requests_total ${counters.requests_total}`);
 
-  // sum total
-  lines.push(`llm_requests_total ${prometheusCounters.requests_total}`);
+  // Total errors counter
+  lines.push('# HELP llm_errors_total Total number of LLM request errors');
+  lines.push('# TYPE llm_errors_total counter');
+  lines.push(`llm_errors_total ${counters.errors_total}`);
 
+  // Request duration gauge
   lines.push('# HELP llm_request_duration_ms LLM request duration in milliseconds');
   lines.push('# TYPE llm_request_duration_ms gauge');
 
-  // For per-provider/model breakdown expose latest/average metrics
-  // Group by provider+model
-  const groups = {};
-  for (const m of metrics) {
-    const key = `${m.provider || 'unknown'}::${m.model || 'default'}`;
-    if (!groups[key]) groups[key] = { count: 0, sumLatency: 0, latestLatency: 0, errors: 0 };
-    groups[key].count += 1;
-    groups[key].sumLatency += Number(m.latency || 0);
-    groups[key].latestLatency = Number(m.latency || 0);
-    if (m.error) groups[key].errors += 1;
-  }
+  // Request cost gauge
+  lines.push('# HELP llm_request_cost_usd LLM request cost in USD');
+  lines.push('# TYPE llm_request_cost_usd gauge');
 
-  for (const k of Object.keys(groups)) {
-    const [provider, model] = k.split('::');
-    const g = groups[k];
-    const avg = g.count ? g.sumLatency / g.count : 0;
-    // Export an avg and latest metric for convenience
-    lines.push(`llm_request_duration_ms{provider="${provider}",model="${model}",stat="avg"} ${avg}`);
+  // Token usage gauge
+  lines.push('# HELP llm_tokens_total Total tokens used in LLM requests');
+  lines.push('# TYPE llm_tokens_total gauge');
+
+  // Per-provider/model metrics
+  for (const key of Object.keys(groups)) {
+    const [provider, model] = key.split('::');
+    const g = groups[key];
+    const avgLatency = g.count ? g.sumLatency / g.count : 0;
+    const avgCost = g.count ? g.sumCost / g.count : 0;
+    
+    // Latency metrics
+    lines.push(`llm_request_duration_ms{provider="${provider}",model="${model}",stat="avg"} ${avgLatency.toFixed(2)}`);
     lines.push(`llm_request_duration_ms{provider="${provider}",model="${model}",stat="latest"} ${g.latestLatency}`);
-    lines.push(`llm_requests_total{provider="${provider}",model="${model}",success="true"} ${g.count - g.errors}`);
-    lines.push(`llm_requests_total{provider="${provider}",model="${model}",success="false"} ${g.errors}`);
+    
+    // Request count by success/failure
+    lines.push(`llm_requests_total{provider="${provider}",model="${model}",status="success"} ${g.count - g.errors}`);
+    lines.push(`llm_requests_total{provider="${provider}",model="${model}",status="error"} ${g.errors}`);
+    
+    // Cost metrics
+    lines.push(`llm_request_cost_usd{provider="${provider}",model="${model}"} ${avgCost.toFixed(6)}`);
+    
+    // Token metrics
+    lines.push(`llm_tokens_total{provider="${provider}",model="${model}"} ${g.sumTokens}`);
   }
 
-  res.set('Content-Type', 'text/plain; version=0.0.4');
-  res.send(lines.join('\n'));
+  res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(lines.join('\n') + '\n');
 });
 
-app.listen(PORT, () => {
-  console.log(`Agent running on http://localhost:${PORT}`);
+/**
+ * Error handling middleware
+ */
+app.use((err, req, res, next) => {
+  console.error('[ERROR]', err);
+  
+  if (err instanceof LLMWatchError) {
+    return res.status(err.statusCode).json(err.toJSON());
+  }
+  
+  res.status(500).json({
+    ok: false,
+    error: {
+      message: 'Internal server error',
+      code: 'INTERNAL_ERROR',
+    },
+  });
 });
+
+/**
+ * Start server
+ */
+app.listen(config.server.port, config.server.host, () => {
+  console.log('='.repeat(60));
+  console.log('LLM Watch Agent Started');
+  console.log('='.repeat(60));
+  console.log(`Server: http://${config.server.host}:${config.server.port}`);
+  console.log(`Available providers: ${getAvailableProviders().join(', ')}`);
+  console.log(`Prometheus metrics: ${config.prometheus.enabled ? 'enabled' : 'disabled'}`);
+  console.log(`CORS: ${config.server.corsEnabled ? 'enabled' : 'disabled'}`);
+  console.log('='.repeat(60));
+});
+
+export default app;

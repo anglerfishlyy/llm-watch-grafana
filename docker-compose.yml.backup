@@ -4,12 +4,18 @@ services:
   agent:
     build: ./agent
     container_name: llm-watch-agent
-    network_mode: "host"
+    ports:
+      - "8080:8080"
     environment:
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
       - LLAMA_API_KEY=${LLAMA_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - PORT=8080
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - llm-watch
     restart: unless-stopped
 
   mcp-gateway:
@@ -18,24 +24,33 @@ services:
       dockerfile: Dockerfile
     container_name: llm-watch-mcp-gateway
     command: node mcp_gateway.js
-    network_mode: "host"
+    ports:
+      - "8081:8081"
     environment:
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
       - LLAMA_API_KEY=${LLAMA_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - MCP_GATEWAY_PORT=8081
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - llm-watch
     restart: unless-stopped
 
   grafana:
     image: grafana/grafana:latest
     container_name: llm-watch-grafana
-    network_mode: "host"
+    ports:
+      - "3000:3000"
     volumes:
       - ./plugin/anglerfishlyy-llmwatch-panel/dist:/var/lib/grafana/plugins/anglerfishlyy-llmwatch-panel
       - ./grafana/provisioning:/etc/grafana/provisioning
     environment:
       - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=anglerfishlyy-llmwatch-panel
       - GF_DEFAULT_APP_MODE=development
+    networks:
+      - llm-watch
     depends_on:
       - agent
     restart: unless-stopped
@@ -43,9 +58,16 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: llm-watch-prometheus
-    network_mode: "host"
+    ports:
+      - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - llm-watch
     depends_on:
       - agent
     restart: unless-stopped
+
+networks:
+  llm-watch:
+    driver: bridge
