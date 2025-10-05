@@ -1,4 +1,4 @@
-# 🚀 LLM Watch — Real-Time AI Observability for Grafana
+#  LLM Watch — Real-Time AI Observability for Grafana
 
 [![FutureStack GenAI Hackathon](https://img.shields.io/badge/FutureStack-GenAI%20Hackathon-blue)](https://futurestack.dev)
 [![Cerebras](https://img.shields.io/badge/Powered%20by-Cerebras-orange)](https://cerebras.ai)
