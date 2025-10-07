@@ -249,7 +249,7 @@ CEREBRAS_API_URL=https://api.cerebras.ai/v1/chat/completions
 
 ### 🔗 **Docker MCP Gateway**
 
-**Status**: ℹ️ **Architecture Implemented**
+**Status**:  **Architecture Implemented**
 
 - **Purpose**: Model Context Protocol gateway for multi-provider routing
 - **Implementation**: Separate microservice (`mcp_gateway.js`)
@@ -333,7 +333,7 @@ llm_request_cost_usd{provider="cerebras",model="llama3.1-8b"} 0.000125
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 
@@ -925,9 +925,7 @@ Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
 **Demo**: http://localhost:3000 (after running `docker compose up`)
 
-**Video Demo**: [Link to demo video]
-
-**Live Demo**: [Link to hosted instance]
+**Video Demo**: https://youtu.be/Sm0dIyy_KAg
 
 ---
 
