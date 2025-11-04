@@ -35,17 +35,6 @@ app.get('/health', (req, res) => {
 });
 
 /**
- * Auto-generate demo metrics for testing
- */
-if (config.metrics.demoGenerationInterval > 0) {
-  setInterval(() => {
-    const demoMetric = generateDemoMetric();
-    metricsStore.add(demoMetric);
-  }, config.metrics.demoGenerationInterval);
-  console.log(`Demo metrics generation enabled (interval: ${config.metrics.demoGenerationInterval}ms)`);
-}
-
-/**
  * Main LLM call endpoint
  * Proxies requests to configured providers and records metrics
  */

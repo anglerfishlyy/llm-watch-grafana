@@ -32,6 +32,8 @@ const defaultOptions: LLMWatchOptions = {
   promQuery: 'llm_request_duration_ms',
 };
 
+const AGENT_LOCAL = 'http://localhost:8080/metrics/all';
+
 
     export const LLMWatchPanel: React.FC<PanelProps<LLMWatchOptions>> = ({ options = defaultOptions, width = 600, height = 400 }) => {
       const theme = useTheme2();
@@ -45,7 +47,6 @@ const defaultOptions: LLMWatchOptions = {
       const [domReady, setDomReady] = useState(false);
       const isMountedRef = useRef(true);
 
-      const AGENT_LOCAL = 'http://localhost:8080/metrics/all';
 
       useEffect(() => {
         isMountedRef.current = true;
