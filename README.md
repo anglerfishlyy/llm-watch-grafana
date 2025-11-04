@@ -1,6 +1,6 @@
 #  LLM Watch — Real-Time AI Observability for Grafana
 
-[![FutureStack GenAI Hackathon](https://img.shields.io/badge/FutureStack-GenAI%20Hackathon-blue)](https://futurestack.dev)
+
 [![Cerebras](https://img.shields.io/badge/Powered%20by-Cerebras-orange)](https://cerebras.ai)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://docker.com)
 [![Grafana](https://img.shields.io/badge/Grafana-Plugin-F46800?logo=grafana)](https://grafana.com)
@@ -57,7 +57,6 @@ LLM Watch provides a **complete observability stack** for AI workloads:
 - RESTful API for metric queries and LLM calls
 - Prometheus metrics exposition
 - In-memory metric storage with aggregation
-- Demo metric generation for testing
 
 ###  **Docker Stack**
 - Complete orchestration with docker-compose
@@ -89,7 +88,7 @@ LLM Watch provides a **complete observability stack** for AI workloads:
 │  └────────────┬──────────────────────┬──────────────────────┘  │
 └───────────────┼──────────────────────┼─────────────────────────┘
                 │                      │
-                │ Query Metrics        │ Fetch Demo Data
+                │ Query Metrics        │ Fetch Real Metrics
                 ↓                      ↓
 ┌───────────────────────────┐  ┌──────────────────────────────────┐
 │   Prometheus Server       │  │      LLM Watch Agent             │
@@ -172,7 +171,7 @@ LLM Watch provides a **complete observability stack** for AI workloads:
 
 ---
 
-## 🌟 Sponsor Technologies Integration
+## 🌟  Technologies Integration
 
 ### 🔥 **Cerebras API** (Primary Integration)
 
@@ -191,7 +190,7 @@ LLM Watch showcases **Cerebras** as the primary AI provider with production-read
 
 **Implementation**:
 ```javascript
-// agent/providers/cerebras.js
+
 export async function callCerebras({ prompt, model = 'llama3.1-8b' }) {
   const { apiKey, apiUrl } = config.providers.cerebras;
   
@@ -233,7 +232,7 @@ CEREBRAS_API_URL=https://api.cerebras.ai/v1/chat/completions
 }
 ```
 
-### 🦙 **LLAMA / OpenRouter Integration**
+###  **LLAMA / OpenRouter Integration**
 
 **Status**: ⚠️ **Implemented with DNS Considerations**
 
@@ -247,7 +246,7 @@ CEREBRAS_API_URL=https://api.cerebras.ai/v1/chat/completions
   - Same metric tracking as Cerebras
 - **Known Limitation**: Docker DNS resolution may require host network mode (documented in `FINAL_STATUS.md`)
 
-### 🔗 **Docker MCP Gateway**
+###  **Docker MCP Gateway**
 
 **Status**:  **Architecture Implemented**
 
@@ -505,7 +504,7 @@ curl -X POST http://localhost:8080/call \
 
 ---
 
-## 🔧 Configuration
+##  Configuration
 
 ### Environment Variables
 
@@ -903,7 +902,7 @@ Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
 ## 🏆 Hackathon Submission
 
-### FutureStack GenAI Hackathon
+### FutureStack GenAI Hackathon [![FutureStack GenAI Hackathon](https://img.shields.io/badge/FutureStack-GenAI%20Hackathon-blue)](https://futurestack.dev)
 
 **Project**: LLM Watch - Real-Time AI Observability for Grafana
 

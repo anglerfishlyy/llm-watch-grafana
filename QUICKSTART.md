@@ -9,6 +9,9 @@ Get LLM Watch up and running in 5 minutes.
 - 4GB RAM available
 - Ports 3000, 8080, 8081, 9090 available
 
+- **Note:** This plugin displays real LLM metrics only. You must configure at least one provider API key and make actual LLM calls via the `/call` endpoint to see data. The agent does not generate mock/demo data.
+
+
 ## Step 1: Clone and Configure (2 minutes)
 
 ```bash
